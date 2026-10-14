@@ -340,14 +340,14 @@ with tab3:
                     mitjana_jugador = eix_y_3.mean()
                     ax3.axhline(mitjana_jugador, color='gray', linestyle=':', linewidth=1.5, label=f"Mitjana Global: {mitjana_jugador:.2f}")
 
-                ax3.set_xticks(x_vals_3)
-                ax3.set_xticklabels(eix_x_str_3, rotation=45, ha='right')
-
             for ordre, color in ordre_color_map.items():
                 estil = ordre_estil_map.get(ordre, '-')
                 mitjana_val = mitjanes_ordres.get(ordre, np.nan)
                 etiqueta_ordre = f"Ordre {ordre} (Mitjana: {mitjana_val:.2f})" if not np.isnan(mitjana_val) else f"Ordre {ordre}"
                 ax3.plot([], [], marker='o', color=color, linestyle=estil, linewidth=2, label=etiqueta_ordre)
+
+            ax3.set_xticks(x_vals_3)
+            ax3.set_xticklabels(eix_x_str_3, rotation=45, ha='right')
 
             ordres_str = ", ".join(map(str, sel_ordres))
             ax3.set_title(f"Evolució Temporal — Temporada: {sel_temp_3} | Ordre(s): {ordres_str} | Jugador: {sel_jugador}", fontsize=12, fontweight='bold')
@@ -369,4 +369,3 @@ with tab3:
                 mime="image/png",
                 key="dl3"
             )
-    )
