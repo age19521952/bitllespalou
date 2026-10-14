@@ -15,7 +15,6 @@ def carregar_dades():
     df_all = pd.concat(df_list, ignore_index=True)
     
     df_all['total'] = pd.to_numeric(df_all['total'], errors='coerce')
-    df_all['punts'] = pd.to_numeric(df_all['punts'], errors='coerce').fillna(0)
     df_all['temporada'] = df_all['temporada'].astype(str)
     df_all['ordre'] = pd.to_numeric(df_all['ordre'], errors='coerce')
     df_all['np'] = pd.to_numeric(df_all['np'], errors='coerce').fillna(1).astype(int)
@@ -26,6 +25,29 @@ def carregar_dades():
     if 'ddmmaa' in df_all.columns:
         df_all['ddmmaa'] = pd.to_datetime(df_all['ddmmaa'], errors='coerce')
         
+    # --- FILTRE GLOBAL DE PUNTS (0, 0.2, 0.4 / 0,2 / 0,4) ---
+    def es_valor_valid_global(val):
+        if pd.isna(val):
+            return False
+        v_str = str(val).strip().lower().replace('.', ',')
+        return v_str in ['cero', '0', '0,0', '0,2', '0,4']
+
+    if 'punts' in df_all.columns:
+        df_all = df_all[df_all['punts'].apply(es_valor_valid_global)].copy()
+        
+        def convertir_punts(val):
+            v_str = str(val).strip().lower()
+            if v_str == 'cero' or v_str == '':
+                return 0.0
+            try:
+                return float(v_str.replace(',', '.'))
+            except:
+                return 0.0
+                
+        df_all['punts_num'] = df_all['punts'].apply(convertir_punts)
+    else:
+        df_all['punts_num'] = 0.0
+
     return df_all
 
 try:
@@ -67,16 +89,16 @@ with tab1:
         group_cols_1 = ['ddmmaa', 'np'] if 'ddmmaa' in sub_df_1.columns and not sub_df_1['ddmmaa'].isna().all() else ['jornada', 'np']
         
         if 'partit' in sub_df_1.columns:
-            df_suma = sub_df_1.groupby(group_cols_1, as_index=False).agg({'total': 'sum', 'punts': 'sum', 'partit': 'first'})
+            df_suma = sub_df_1.groupby(group_cols_1, as_index=False).agg({'total': 'sum', 'punts_num': 'sum', 'partit': 'first'})
             df_suma['partit_str'] = df_suma['partit'].astype(str)
         else:
-            df_suma = sub_df_1.groupby(group_cols_1, as_index=False).agg({'total': 'sum', 'punts': 'sum'})
+            df_suma = sub_df_1.groupby(group_cols_1, as_index=False).agg({'total': 'sum', 'punts_num': 'sum'})
             df_suma['partit_str'] = "Partit " + df_suma['np'].astype(str)
 
         df_suma = df_suma.sort_values(by=group_cols_1, ascending=[True, True])
         eix_x_str_1 = df_suma['partit_str'] + ' (P' + df_suma['np'].astype(str) + ')'
         eix_y_1 = df_suma['total'].values
-        eix_punts_1 = df_suma['punts'].values
+        eix_punts_1 = df_suma['punts_num'].values
         x_vals_1 = np.arange(len(df_suma))
 
         st.subheader(f"Resum Suma Titulars — Temporada: {sel_temp_1}")
@@ -157,31 +179,11 @@ with tab2:
         (df_temp_filtered_2['jornada'].isin(sel_jornades_2))
     ].copy()
 
-    def es_valor_valid(val):
-        if pd.isna(val):
-            return False
-        v_str = str(val).strip().lower().replace('.', ',')
-        return v_str in ['cero', '0', '0,0', '0,2', '0,4']
-
-    if 'punts' in sub_df_2.columns:
-        sub_df_2 = sub_df_2[sub_df_2['punts'].apply(es_valor_valid)].copy()
-
     if sub_df_2.empty:
         st.warning("No hi ha dades de titulars amb els criteris seleccionats.")
     else:
         group_cols_2 = ['ddmmaa', 'np'] if 'ddmmaa' in sub_df_2.columns and not sub_df_2['ddmmaa'].isna().all() else ['jornada', 'np']
         
-        def convertir_punts(val):
-            v_str = str(val).strip().lower()
-            if v_str == 'cero' or v_str == '':
-                return 0.0
-            try:
-                return float(v_str.replace(',', '.'))
-            except:
-                return 0.0
-
-        sub_df_2['punts_num'] = sub_df_2['punts'].apply(convertir_punts)
-
         if 'partit' in sub_df_2.columns:
             df_partits = sub_df_2.groupby(group_cols_2, as_index=False).agg({'punts_num': 'sum', 'partit': 'first'})
             df_partits['partit_str'] = df_partits['partit'].astype(str)
