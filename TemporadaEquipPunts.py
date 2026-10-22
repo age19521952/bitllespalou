@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import io
 
 st.set_page_config(layout="wide")
-st.title("Estadístiques Bitlles Palou — Quadre de Comandament Integral")
+st.title("Estadístiques Bitlles Palou — Suma Total Titulars i Resultats")
 
 @st.cache_data
 def carregar_dades():
@@ -14,7 +14,10 @@ def carregar_dades():
     df_list = [pd.read_excel(xls, sheet_name=sheet) for sheet in xls.sheet_names]
     df_all = pd.concat(df_list, ignore_index=True)
     
+    # Neteja general de columnes numèriques i text
+    df_all['equip_str'] = df_all['equip'].astype(str).str.strip().str.upper()
     df_all['total'] = pd.to_numeric(df_all['total'], errors='coerce')
+    df_all['punts'] = pd.to_numeric(df_all['punts'], errors='coerce').fillna(0)
     df_all['temporada'] = df_all['temporada'].astype(str)
     df_all['ordre'] = pd.to_numeric(df_all['ordre'], errors='coerce')
     df_all['np'] = pd.to_numeric(df_all['np'], errors='coerce').fillna(1).astype(int)
@@ -25,29 +28,6 @@ def carregar_dades():
     if 'ddmmaa' in df_all.columns:
         df_all['ddmmaa'] = pd.to_datetime(df_all['ddmmaa'], errors='coerce')
         
-    # --- FILTRE GLOBAL DE PUNTS (0, 0.2, 0.4 / 0,2 / 0,4) ---
-    def es_valor_valid_global(val):
-        if pd.isna(val):
-            return False
-        v_str = str(val).strip().lower().replace('.', ',')
-        return v_str in ['cero', '0', '0,0', '0,2', '0,4']
-
-    if 'punts' in df_all.columns:
-        df_all = df_all[df_all['punts'].apply(es_valor_valid_global)].copy()
-        
-        def convertir_punts(val):
-            v_str = str(val).strip().lower()
-            if v_str == 'cero' or v_str == '':
-                return 0.0
-            try:
-                return float(v_str.replace(',', '.'))
-            except:
-                return 0.0
-                
-        df_all['punts_num'] = df_all['punts'].apply(convertir_punts)
-    else:
-        df_all['punts_num'] = 0.0
-
     return df_all
 
 try:
@@ -56,318 +36,193 @@ except Exception as e:
     st.error(f"No s'ha pogut carregar el fitxer 'bitllespalou.xlsx': {e}")
     st.stop()
 
-# --- CREAR LES 3 PESTANYES ---
-tab1, tab2, tab3 = st.tabs([
-    "📊 Suma Titulars i Resultats", 
-    "📈 Doble Eix Y (Reals vs Acumulats)", 
-    "👥 Evolució per Ordre i Jugadors"
-])
+# --- FILTRES A LA BARRA LATERAL ---
+st.sidebar.header("Filtres")
 
-# ==========================================
-# PESTANYA 1: Suma Total Titulars i Resultats
-# ==========================================
-with tab1:
-    st.header("Suma Total Titulars (Ordres 1-5) i Resultats")
-    
-    palou_df_1 = df_all[df_all['equip'].astype(str).str.strip().str.upper() == 'PALOU'].copy()
-    temporades_1 = sorted(palou_df_1['temporada'].dropna().unique())
-    sel_temp_1 = st.selectbox("Selecciona Temporada (Vista 1):", temporades_1, key="t1")
-    
-    df_temp_filtered_1 = palou_df_1[palou_df_1['temporada'] == sel_temp_1]
-    jornades_disp_1 = sorted(df_temp_filtered_1['jornada'].dropna().unique()) if 'jornada' in df_temp_filtered_1.columns else []
-    
-    sel_jornades_1 = st.multiselect("Selecciona Jornada(s) (Vista 1):", options=jornades_disp_1, default=jornades_disp_1, key="j1")
-    
-    sub_df_1 = df_temp_filtered_1[
-        (df_temp_filtered_1['ordre'].isin([1, 2, 3, 4, 5])) & 
-        (df_temp_filtered_1['jornada'].isin(sel_jornades_1))
-    ].copy()
-    
-    if sub_df_1.empty:
-        st.info("No hi ha dades per a la selecció actual.")
-    else:
-        group_cols_1 = ['ddmmaa', 'np'] if 'ddmmaa' in sub_df_1.columns and not sub_df_1['ddmmaa'].isna().all() else ['jornada', 'np']
-        
-        if 'partit' in sub_df_1.columns:
-            df_suma = sub_df_1.groupby(group_cols_1, as_index=False).agg({'total': 'sum', 'punts_num': 'sum', 'partit': 'first'})
-            df_suma['partit_str'] = df_suma['partit'].astype(str)
-        else:
-            df_suma = sub_df_1.groupby(group_cols_1, as_index=False).agg({'total': 'sum', 'punts_num': 'sum'})
-            df_suma['partit_str'] = "Partit " + df_suma['np'].astype(str)
+# 1. Filtre de Temporada
+temporades = sorted(df_all['temporada'].dropna().unique())
+sel_temp = st.sidebar.selectbox("Selecciona Temporada:", temporades)
 
-        df_suma = df_suma.sort_values(by=group_cols_1, ascending=[True, True])
-        eix_x_str_1 = df_suma['partit_str'] + ' (P' + df_suma['np'].astype(str) + ')'
-        eix_y_1 = df_suma['total'].values
-        eix_punts_1 = df_suma['punts_num'].values
-        x_vals_1 = np.arange(len(df_suma))
+# Obtenir les jornades disponibles per a la temporada seleccionada
+df_temp_filtered = df_all[df_all['temporada'] == sel_temp]
+jornades_disp = sorted(df_temp_filtered['jornada'].dropna().unique()) if 'jornada' in df_temp_filtered.columns else []
 
-        st.subheader(f"Resum Suma Titulars — Temporada: {sel_temp_1}")
-        df_taula_resum = pd.DataFrame({
-            'Partit / Partida': eix_x_str_1,
-            'Suma Total Titulars': eix_y_1,
-            'Suma Punts Partit': eix_punts_1
+# 2. Filtre múltiple de Jornada
+sel_jornades = st.sidebar.multiselect(
+    "Selecciona Jornada(s):", 
+    options=jornades_disp, 
+    default=jornades_disp
+)
+
+# Filtrar dades de la temporada i jornades per a ordres titulars (1, 2, 3, 4, 5)
+sub_df_all = df_temp_filtered[
+    (df_temp_filtered['ordre'].isin([1, 2, 3, 4, 5])) & 
+    (df_temp_filtered['jornada'].isin(sel_jornades))
+].copy()
+
+if sub_df_all.empty:
+    st.info("No hi ha dades per a la selecció actual de temporada i jornades.")
+else:
+    group_cols = ['ddmmaa', 'np'] if 'ddmmaa' in sub_df_all.columns and not sub_df_all['ddmmaa'].isna().all() else ['jornada', 'np']
+    
+    # Separar Palou i l'altre equip
+    sub_palou = sub_df_all[sub_df_all['equip_str'] == 'PALOU']
+    sub_rival = sub_df_all[sub_df_all['equip_str'] != 'PALOU']
+
+    # Suma de Palou
+    if 'partit' in sub_palou.columns:
+        df_suma_palou = sub_palou.groupby(group_cols, as_index=False).agg({
+            'total': 'sum', 
+            'punts': 'sum', 
+            'partit': 'first'
         })
-        st.dataframe(df_taula_resum, use_container_width=True, hide_index=True)
-
-        fig1, ax1 = plt.subplots(figsize=(13, 6))
-        ax1.plot(x_vals_1, eix_y_1, linestyle='-', linewidth=1.5, color='#B0BEC5', alpha=0.7, zorder=1)
-
-        colors_map = {2: '#2E7D32', 1: '#1E88E5', 0: '#D32F2F'}
-        labels_map = {2: 'Guanyat (2 pts)', 1: 'Empatat (1 pt)', 0: 'Perdut (0 pts)'}
-        
-        for i in range(len(x_vals_1)):
-            p_val = eix_punts_1[i]
-            color_actual = colors_map.get(int(p_val), '#1E88E5')
-            ax1.plot(x_vals_1[i], eix_y_1[i], marker='o', markersize=8, color=color_actual, zorder=3)
-            ax1.annotate(f"{int(eix_y_1[i])}", (x_vals_1[i], eix_y_1[i]), textcoords="offset points", xytext=(0,8), ha='center', fontsize=9, fontweight='bold', color=color_actual, zorder=4)
-
-        for p_val, col in colors_map.items():
-            if p_val in eix_punts_1:
-                ax1.plot([], [], marker='o', color=col, markersize=8, linestyle='None', label=labels_map[p_val])
-
-        mitjana_equip = eix_y_1.mean()
-        ax1.axhline(mitjana_equip, color='gray', linestyle=':', linewidth=1.5, label=f"Mitjana Global: {mitjana_equip:.2f}", zorder=2)
-
-        if len(eix_y_1) > 1:
-            z1 = np.polyfit(x_vals_1, eix_y_1, 1)
-            p1 = np.poly1d(z1)
-            ax1.plot(x_vals_1, p1(x_vals_1), color='orange', linestyle='--', linewidth=1.5, alpha=0.8, label="Tendència Lineal", zorder=2)
-
-        ax1.set_xticks(x_vals_1)
-        ax1.set_xticklabels(eix_x_str_1, rotation=45, ha='right')
-        ax1.set_title(f"Evolució Suma Punts Titulars i Resultats — Temporada: {sel_temp_1}", fontsize=12, fontweight='bold')
-        ax1.set_xlabel("Partit i Partida (np) [Ordre Cronològic]", fontsize=10)
-        ax1.set_ylabel("Punts Totals", fontsize=10)
-        ax1.legend(title="Llegenda", bbox_to_anchor=(1.05, 1), loc='upper left')
-        ax1.grid(True, linestyle='--', alpha=0.6)
-        plt.tight_layout()
-
-        st.pyplot(fig1)
-
-        buf1 = io.BytesIO()
-        fig1.savefig(buf1, format="png", dpi=300, bbox_inches='tight')
-        buf1.seek(0)
-        st.download_button(
-            label="📥 Descarregar gràfica 1 per WhatsApp",
-            data=buf1,
-            file_name="suma_titulars_resultats_palou.png",
-            mime="image/png",
-            key="dl1"
-        )
-
-# ==========================================
-# PESTANYA 2: Doble Eix Y (Reals vs Acumulats)
-# ==========================================
-with tab2:
-    st.header("Evolució Doble Eix Y (Punts Partit vs. Acumulats)")
-    
-    equips_disp = sorted(df_all['equip'].astype(str).str.strip().unique().tolist())
-    equip_defaut = 'PALOU' if 'PALOU' in equips_disp else equips_disp[0]
-    sel_equip_2 = st.selectbox("Selecciona Equip (Vista 2):", equips_disp, index=equips_disp.index(equip_defaut), key="eq2")
-    
-    df_equip_2 = df_all[df_all['equip'].astype(str).str.strip().str.upper() == sel_equip_2.upper()]
-    temporades_2 = sorted(df_equip_2['temporada'].dropna().unique())
-    sel_temp_2 = st.selectbox("Selecciona Temporada (Vista 2):", temporades_2, key="t2")
-    
-    df_temp_filtered_2 = df_equip_2[df_equip_2['temporada'] == sel_temp_2]
-    jornades_disp_2 = sorted(df_temp_filtered_2['jornada'].dropna().unique()) if 'jornada' in df_temp_filtered_2.columns else []
-    
-    sel_jornades_2 = st.multiselect("Selecciona Jornada(s) (Vista 2):", options=jornades_disp_2, default=jornades_disp_2, key="j2")
-    
-    sub_df_2 = df_temp_filtered_2[
-        (df_temp_filtered_2['ordre'].isin([1, 2, 3, 4, 5])) & 
-        (df_temp_filtered_2['jornada'].isin(sel_jornades_2))
-    ].copy()
-
-    if sub_df_2.empty:
-        st.warning("No hi ha dades de titulars amb els criteris seleccionats.")
+        df_suma_palou['partit_str'] = df_suma_palou['partit'].astype(str)
     else:
-        group_cols_2 = ['ddmmaa', 'np'] if 'ddmmaa' in sub_df_2.columns and not sub_df_2['ddmmaa'].isna().all() else ['jornada', 'np']
-        
-        if 'partit' in sub_df_2.columns:
-            df_partits = sub_df_2.groupby(group_cols_2, as_index=False).agg({'punts_num': 'sum', 'partit': 'first'})
-            df_partits['partit_str'] = df_partits['partit'].astype(str)
-        else:
-            df_partits = sub_df_2.groupby(group_cols_2, as_index=False).agg({'punts_num': 'sum'})
-            df_partits['partit_str'] = "Partit " + df_partits['np'].astype(str)
+        df_suma_palou = sub_palou.groupby(group_cols, as_index=False).agg({
+            'total': 'sum',
+            'punts': 'sum'
+        })
+        df_suma_palou['partit_str'] = "Partit " + df_suma_palou['np'].astype(str)
 
-        df_partits = df_partits.sort_values(by=group_cols_2, ascending=[True, True]).reset_index(drop=True)
-        df_partits['p_real'] = df_partits['punts_num']
-        df_partits['p_ideal'] = 2.0  
-        df_partits['p_real_acum'] = df_partits['p_real'].cumsum()
-        df_partits['p_ideal_acum'] = df_partits['p_ideal'].cumsum()
+    # Suma de l'altre equip (rival)
+    df_suma_rival = sub_rival.groupby(group_cols, as_index=False).agg({
+        'total': 'sum'
+    }).rename(columns={'total': 'total_rival'})
 
-        eix_x_str_2 = df_partits['partit_str'] + ' (P' + df_partits['np'].astype(str) + ')'
-        x_vals_2 = np.arange(len(df_partits))
+    # Fusionar les dades de Palou i del rival
+    df_suma = pd.merge(df_suma_palou, df_suma_rival, on=group_cols, how='left')
+    df_suma['total_rival'] = df_suma['total_rival'].fillna(0)
 
-        total_reals = df_partits['p_real_acum'].iloc[-1] if not df_partits.empty else 0
-        total_ideals = df_partits['p_ideal_acum'].iloc[-1] if not df_partits.empty else 0
-        eficiencia = (total_reals / total_ideals) * 100 if total_ideals > 0 else 0
+    # Ordenació cronològica estricta ascendent
+    df_suma = df_suma.sort_values(by=group_cols, ascending=[True, True]).reset_index(drop=True)
 
-        col_kpi1, col_kpi2, col_kpi3 = st.columns(3)
-        col_kpi1.metric("Suma Punts Reals Acumulats", f"{total_reals:.1f} pts")
-        col_kpi2.metric("Suma Punts Màxims (Ideal)", f"{total_ideals:.1f} pts")
-        col_kpi3.metric("Eficiència Global", f"{eficiencia:.1f}%")
-        st.markdown("---")
-
-        fig2, ax2_1 = plt.subplots(figsize=(13, 6.5))
-        color_esq = '#1E88E5'
-        ax2_1.set_xlabel("Partit i Partida (np) [Ordre Cronològic]", fontsize=10)
-        ax2_1.set_ylabel("Punts Partit (Eix Esquerre)", color=color_esq, fontsize=10, fontweight='bold')
-        ax2_1.set_yticks([0, 1, 2])
-        ax2_1.set_ylim(-0.2, 2.2)
-
-        line1 = ax2_1.plot(x_vals_2, df_partits['p_real'], color=color_esq, marker='o', linewidth=2, label="Punts Reals (Partit)")
-        ax2_1.tick_params(axis='y', labelcolor=color_esq)
-
-        for i, txt in enumerate(df_partits['p_real']):
-            ax2_1.annotate(f"{int(txt)}", (x_vals_2[i], df_partits['p_real'][i]), textcoords="offset points", xytext=(0,8), ha='center', fontsize=8, fontweight='bold', color=color_esq)
-
-        ax2_2 = ax2_1.twinx()  
-        color_dret_real = '#2E7D32'
-        color_dret_ideal = '#E53935'
-        ax2_2.set_ylabel("Punts Acumulats (Eix Dret)", color=color_dret_real, fontsize=10, fontweight='bold')
-
-        line2 = ax2_2.plot(x_vals_2, df_partits['p_real_acum'], color=color_dret_real, marker='s', linewidth=2.5, label="Punts Reals Acumulats")
-        line3 = ax2_2.plot(x_vals_2, df_partits['p_ideal_acum'], color=color_dret_ideal, marker='^', linewidth=2, linestyle='--', label="Escenari Ideal Acumulat")
-        ax2_2.tick_params(axis='y', labelcolor=color_dret_real)
-
-        ax2_1.set_xticks(x_vals_2)
-        ax2_1.set_xticklabels(eix_x_str_2, rotation=45, ha='right')
-
-        lines = line1 + line2 + line3
-        labels = [l.get_label() for l in lines]
-        ax2_1.legend(lines, labels, loc='upper left', bbox_to_anchor=(0.02, 0.90))
-
-        text_kpis = f"Punts Reals: {total_reals:.1f} pts   |   Punts Ideals: {total_ideals:.1f} pts   |   Eficiència: {eficiencia:.1f}%"
-        fig2.suptitle(text_kpis, fontsize=12, fontweight='bold', color='#1E88E5', y=0.97)
-
-        ax2_1.grid(True, linestyle='--', alpha=0.4)
-        fig2.tight_layout(rect=[0, 0, 1, 0.94])
-
-        st.pyplot(fig2)
-
-        buf2 = io.BytesIO()
-        fig2.savefig(buf2, format="png", dpi=300, bbox_inches='tight')
-        buf2.seek(0)
-        st.download_button(
-            label="📥 Descarregar gràfica 2 per WhatsApp",
-            data=buf2,
-            file_name=f"doble_eix_punts_{sel_equip_2}_{sel_temp_2}.png",
-            mime="image/png",
-            key="dl2"
-        )
-
-# ==========================================
-# PESTANYA 3: Evolució per Ordre i Jugadors
-# ==========================================
-with tab3:
-    st.header("Evolució per Ordre i Jugadors")
+    # --- CÀLCULS DE PUNTS ACUMULATS, % I MITJANA ACUMULADA ---
+    df_suma['acumulat_punts'] = df_suma['punts'].cumsum()
+    max_punts_possibles = (df_suma.index + 1) * 2
+    df_suma['pct_punts_acumulats'] = (df_suma['acumulat_punts'] / max_punts_possibles) * 100
     
-    palou_df_3 = df_all[df_all['equip'].astype(str).str.strip().str.upper() == 'PALOU'].copy()
-    pivot_df = pd.pivot_table(palou_df_3, values='total', index='ordre', columns='temporada', aggfunc='mean').round(2)
-    st.subheader("Taula Dinàmica: Mitjana de Punts (Ordre vs Temporada)")
-    st.dataframe(pivot_df, use_container_width=True)
+    # Càlcul de la mitjana acumulada de bolos de Palou
+    df_suma['mitjana_acumulada_palou'] = df_suma['total'].expanding().mean()
 
-    temporades_3 = sorted(palou_df_3['temporada'].dropna().unique())
-    sel_temp_3 = st.selectbox("Selecciona Temporada (Vista 3):", temporades_3, key="t3")
+    eix_x_str = df_suma['partit_str'] + ' (P' + df_suma['np'].astype(str) + ')'
+    eix_y_palou = df_suma['total'].values
+    eix_y_rival = df_suma['total_rival'].values
+    eix_punts = df_suma['punts'].values
+    eix_acumulat = df_suma['acumulat_punts'].values
+    eix_pct = df_suma['pct_punts_acumulats'].values
+    eix_mitjana_acum = df_suma['mitjana_acumulada_palou'].values
+    x_vals = np.arange(len(df_suma))
 
-    ordres_disp = sorted(palou_df_3['ordre'].dropna().unique())
-    sel_ordres = st.multiselect("Selecciona Ordre(s):", ordres_disp, default=[ordres_disp[0]] if ordres_disp else [], key="ord3")
+    # Obtenir l'últim valor de la mitjana acumulada
+    ultima_mitjana_palou = eix_mitjana_acum[-1] if len(eix_mitjana_acum) > 0 else 0.0
 
-    sub_df_temp_3 = palou_df_3[(palou_df_3['temporada'] == sel_temp_3) & (palou_df_3['ordre'].isin(sel_ordres))]
-    jugadors_disp = ['Tots'] + sorted(sub_df_temp_3['jugador'].dropna().astype(str).unique().tolist())
-    sel_jugador = st.selectbox("Selecciona Jugador:", jugadors_disp, key="jug3")
+    # Taula resum amb les columnes
+    st.subheader("Resum Suma Titulars (Ordres 1-5) — Temporada: " + str(sel_temp))
+    df_taula_resum = pd.DataFrame({
+        'Partit / Partida': eix_x_str,
+        'Suma Total Titulars (Palou)': eix_y_palou,
+        'Suma Total Titulars (Rival)': eix_y_rival,
+        'Suma Punts Partit': eix_punts,
+        'Acumulat Punts': eix_acumulat,
+        '% Punts Acumulats': eix_pct.round(2).astype(str) + '%',
+        'Mitjana Acumulada Palou': eix_mitjana_acum.round(2)
+    })
+    st.dataframe(df_taula_resum, use_container_width=True, hide_index=True)
 
-    if not sel_ordres:
-        st.warning("Selecciona almenys un ordre.")
-    else:
-        sub_df_3 = sub_df_temp_3.copy()
-        sub_df_per_mitjana = sub_df_3.copy()
-        if sel_jugador != 'Tots':
-            sub_df_per_mitjana = sub_df_per_mitjana[sub_df_per_mitjana['jugador'].astype(str) == sel_jugador]
-        mitjanes_ordres = sub_df_per_mitjana.groupby('ordre')['total'].mean()
+    # --- GENERAR LA GRÀFICA DE DOBLE EIX ---
+    fig, ax1 = plt.subplots(figsize=(13, 6))
+    
+    width = 0.38  # Ample de les barres
 
-        if sel_jugador != 'Tots':
-            sub_df_3 = sub_df_3[sub_df_3['jugador'].astype(str) == sel_jugador]
+    # Mapa de colors per a les barres de Palou segons resultat (2 = verd, 1 = blau, 0 = vermell)
+    colors_map = {2: '#2E7D32', 1: '#1E88E5', 0: '#D32F2F'}
+    colors_palou = [colors_map.get(int(p), '#1E88E5') for p in eix_punts]
 
-        if sub_df_3.empty:
-            st.info("No hi ha dades per a aquesta selecció.")
-        else:
-            sort_cols_3 = ['ddmmaa', 'np'] if 'ddmmaa' in sub_df_3.columns and not sub_df_3['ddmmaa'].isna().all() else ['jornada', 'np']
-            sub_df_3 = sub_df_3.sort_values(by=sort_cols_3, ascending=[True, True])
+    # Eix Esquerre: Barres de Palou i Rival (Punts de boles)
+    rects1 = ax1.bar(x_vals - width/2, eix_y_palou, width, color=colors_palou, alpha=0.85, label='Palou (Bolos)')
+    rects2 = ax1.bar(x_vals + width/2, eix_y_rival, width, color='#FF7043', alpha=0.85, label='Rival (Bolos)')
 
-            fig3, ax3 = plt.subplots(figsize=(13, 6))
-            colors_disponibles = plt.cm.tab10(np.linspace(0, 1, len(sel_ordres)))
-            estils_linia = ['-', '--', '-.', ':', (0, (3, 1, 1, 1))]
-            
-            ordre_color_map = {ordre: colors_disponibles[i] for i, ordre in enumerate(sel_ordres)}
-            ordre_estil_map = {ordre: estils_linia[i % len(estils_linia)] for i, ordre in enumerate(sel_ordres)}
-            
-            jugadors = sub_df_3['jugador'].dropna().unique()
-            
-            for jugador in jugadors:
-                df_jugador = sub_df_3[sub_df_3['jugador'] == jugador].dropna(subset=['total'])
-                if df_jugador.empty:
-                    continue
-                
-                if 'ddmmaa' in df_jugador.columns and not df_jugador['ddmmaa'].isna().all():
-                    eix_x_str_3 = df_jugador['ddmmaa'].dt.strftime('%d/%m/%Y') + ' (P' + df_jugador['np'].astype(str) + ')'
-                else:
-                    eix_x_str_3 = 'Jor. ' + df_jugador['jornada'].astype(str) + ' (P' + df_jugador['np'].astype(str) + ')'
-                
-                eix_y_3 = df_jugador['total'].values
-                ordres_jugador = df_jugador['ordre'].values
-                x_vals_3 = np.arange(len(df_jugador))
-                
-                if sel_jugador == 'Tots':
-                    col_def = ordre_color_map.get(ordres_jugador[0], '#1E88E5')
-                    estil_def = ordre_estil_map.get(ordres_jugador[0], '-')
-                    ax3.plot(x_vals_3, eix_y_3, marker='o', linestyle=estil_def, linewidth=2, markersize=6, color=col_def, label=str(jugador))
-                    for i, txt in enumerate(eix_y_3):
-                        ax3.annotate(f"{int(txt)}", (x_vals_3[i], eix_y_3[i]), textcoords="offset points", xytext=(0,8), ha='center', fontsize=8, fontweight='bold', color=col_def)
-                else:
-                    for i in range(len(df_jugador)):
-                        ordre_actual = ordres_jugador[i]
-                        col_actual = ordre_color_map.get(ordre_actual, '#1E88E5')
-                        ax3.plot(x_vals_3[i], eix_y_3[i], marker='o', markersize=6, color=col_actual)
-                        ax3.annotate(f"{int(eix_y_3[i])}", (x_vals_3[i], eix_y_3[i]), textcoords="offset points", xytext=(0,8), ha='center', fontsize=8, fontweight='bold', color=col_actual)
-                        
-                        if i < len(df_jugador) - 1:
-                            ordre_seg = ordres_jugador[i+1]
-                            col_seg = ordre_color_map.get(ordre_seg, col_actual)
-                            estil_seg = ordre_estil_map.get(ordre_seg, '-')
-                            ax3.plot([x_vals_3[i], x_vals_3[i+1]], [eix_y_3[i], eix_y_3[i+1]], linestyle=estil_seg, linewidth=2.5, color=col_seg)
+    # Etiquetes numèriques damunt de les barres de Palou
+    for rect in rects1:
+        height = rect.get_height()
+        if height > 0:
+            ax1.annotate(f"{int(height)}",
+                        xy=(rect.get_x() + rect.get_width() / 2, height),
+                        xytext=(0, 3),
+                        textcoords="offset points",
+                        ha='center', va='bottom', fontsize=8, fontweight='bold')
 
-                    mitjana_jugador = eix_y_3.mean()
-                    ax3.axhline(mitjana_jugador, color='gray', linestyle=':', linewidth=1.5, label=f"Mitjana Global: {mitjana_jugador:.2f}")
+    # Etiquetes numèriques damunt de les barres del Rival
+    for rect in rects2:
+        height = rect.get_height()
+        if height > 0:
+            ax1.annotate(f"{int(height)}",
+                        xy=(rect.get_x() + rect.get_width() / 2, height),
+                        xytext=(0, 3),
+                        textcoords="offset points",
+                        ha='center', va='bottom', fontsize=8, fontweight='bold', color='#D84315')
 
-            for ordre, color in ordre_color_map.items():
-                estil = ordre_estil_map.get(ordre, '-')
-                mitjana_val = mitjanes_ordres.get(ordre, np.nan)
-                etiqueta_ordre = f"Ordre {ordre} (Mitjana: {mitjana_val:.2f})" if not np.isnan(mitjana_val) else f"Ordre {ordre}"
-                ax3.plot([], [], marker='o', color=color, linestyle=estil, linewidth=2, label=etiqueta_ordre)
+    # 1. Línia horitzontal d'Objectiu = 355 punts (Eix Esquerre)
+    ax1.axhline(355, color='#D32F2F', linestyle='--', linewidth=1.5, label='Objectiu = 355 pts', zorder=3)
 
-            ax3.set_xticks(x_vals_3)
-            ax3.set_xticklabels(eix_x_str_3, rotation=45, ha='right')
+    # 2. Línia de la Mitjana Acumulada de Palou (Eix Esquerre)
+    ax1.plot(x_vals, eix_mitjana_acum, color='#0288D1', linestyle='-.', linewidth=2, marker='o', markersize=4, label=f"Mitja Acum {ultima_mitjana_palou:.2f}", zorder=4)
 
-            ordres_str = ", ".join(map(str, sel_ordres))
-            ax3.set_title(f"Evolució Temporal — Temporada: {sel_temp_3} | Ordre(s): {ordres_str} | Jugador: {sel_jugador}", fontsize=12, fontweight='bold')
-            ax3.set_xlabel("Data i Partida", fontsize=10)
-            ax3.set_ylabel("Punts (Total)", fontsize=10)
-            ax3.legend(title="Llegenda", bbox_to_anchor=(1.05, 1), loc='upper left')
-            ax3.grid(True, linestyle='--', alpha=0.6)
-            plt.tight_layout()
+    # Fixar el valor mínim de l'eix esquerre a 200
+    ax1.set_ylim(bottom=200)
 
-            st.pyplot(fig3)
+    ax1.set_xlabel("Partit i Partida (np) [Ordre Cronològic]", fontsize=10)
+    ax1.set_ylabel("Punts Totals / Bolos (Suma Titulars)", fontsize=10, color='#1F2937')
+    ax1.grid(True, linestyle='--', alpha=0.4, axis='y')
 
-            buf3 = io.BytesIO()
-            fig3.savefig(buf3, format="png", dpi=300, bbox_inches='tight')
-            buf3.seek(0)
-            st.download_button(
-                label="📥 Descarregar gràfica 3 per WhatsApp",
-                data=buf3,
-                file_name="evolucio_jugadors_palou.png",
-                mime="image/png",
-                key="dl3"
-            )
+    # Eix Dret: Línia / marcadors per als Punts Acumulats de la Classificació
+    ax2 = ax1.twinx()
+    line_acum = ax2.plot(x_vals, eix_acumulat, color='#6A1B9A', marker='D', linewidth=2, markersize=6, label='Punts Acumulats', zorder=5)
+    
+    # Etiquetes numèriques als punts acumulats de l'eix dret
+    for i in range(len(x_vals)):
+        ax2.annotate(f"{int(eix_acumulat[i])} ({eix_pct[i]:.1f}%)", 
+                     (x_vals[i], eix_acumulat[i]),
+                     textcoords="offset points", xytext=(0,10), ha='center', fontsize=8, fontweight='bold', color='#6A1B9A', zorder=6)
+
+    ax2.set_ylabel("Punts Acumulats (Classificació)", fontsize=10, color='#6A1B9A')
+    ax2.tick_params(axis='y', labelcolor='#6A1B9A')
+    
+    # Limitar l'eix dret de manera neta
+    max_poss_final = len(df_suma) * 2
+    ax2.set_ylim(0, max_poss_final * 1.15)
+
+    # Configuració d'eixos X
+    ax1.set_xticks(x_vals)
+    ax1.set_xticklabels(eix_x_str, rotation=45, ha='right')
+
+    ax1.set_title("Evolució Titulars (Palou vs Rival) i Punts Acumulats — Temporada: " + str(sel_temp), fontsize=12, fontweight='bold')
+    
+    # Combinar llegendes de tots dos eixos
+    from matplotlib.patches import Patch
+    legend_elements = [
+        Patch(facecolor='#2E7D32', alpha=0.85, label='Palou Guanyat (2 pts)'),
+        Patch(facecolor='#1E88E5', alpha=0.85, label='Palou Empatat (1 pt)'),
+        Patch(facecolor='#D32F2F', alpha=0.85, label='Palou Perdut (0 pts)'),
+        Patch(facecolor='#FF7043', alpha=0.85, label='Suma Rival (Bolos)'),
+        plt.Line2D([0], [0], color='#D32F2F', linestyle='--', lw=1.5, label='Objectiu = 355 pts'),
+        plt.Line2D([0], [0], color='#0288D1', linestyle='-.', lw=2, marker='o', label=f"Mitja Acum {ultima_mitjana_palou:.2f}"),
+        plt.Line2D([0], [0], color='#6A1B9A', marker='D', lw=2, label='Punts Acumulats i %')
+    ]
+    ax1.legend(handles=legend_elements, title="Llegenda", bbox_to_anchor=(1.15, 1), loc='upper left')
+    
+    plt.tight_layout()
+
+    st.pyplot(fig)
+
+    # Botó de descàrrega directa per a WhatsApp
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=300, bbox_inches='tight')
+    buf.seek(0)
+    
+    st.download_button(
+        label="📥 Descarregar gràfica per WhatsApp",
+        data=buf,
+        file_name="suma_titulars_punts_acumulats_palou.png",
+        mime="image/png"
+    )
