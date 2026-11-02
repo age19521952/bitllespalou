@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analizador Bitlles Palou - Tabla Dinámica (Total=90)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- SheetJS for Excel Reading -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- jsPDF & AutoTable for PDF Generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        
+        /* Density Modes */
+        .compact-table th, .compact-table td {
+            padding: 4px 6px !important;
+            font-size: 11px !important;
+        }
+        .compact-table .min-col-width {
+            min-width: 55px !important;
+        }
+
+        .normal-table th, .normal-table td {
+            padding: 10px 12px !important;
+            font-size: 13px !important;
+        }
+        .normal-table .min-col-width {
+            min-width: 80px !important;
+        }
+
+        /* Compact Modal Table Styling for Maximum Records View */
+        .modal-compact-table th, .modal-compact-table td {
+            padding: 4px 8px !important;
+            font-size: 11px !important;
+            line-height: 1.25 !important;
+        }
+
+        /* Modal styling */
+        .modal-backdrop {
+            background-color: rgba(15, 23, 42, 0.6);
+            backdrop-filter: blur(4px);
+        }
+        .table-container::-webkit-scrollbar {
+            height: 8px;
+            width: 8px;
+        }
+        .table-container::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        .table-container::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
+
+    <!-- Header / Navbar -->
+    <header class="bg-slate-900 text-white shadow-lg border-b border-slate-800 sticky top-0 z-30">
+        <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-4">
+            <div class="flex items-center space-x-3">
+                <div class="bg-indigo-600 p-2 rounded-lg text-white">
+                    <i class="fa-solid fa-table-cells text-xl"></i>
+                </div>
+                <div>
+                    <h1 class="text-lg font-bold leading-tight">Analizador Bitlles Palou</h1>
+                    <p class="text-xs text-slate-400">Tabla Dinámica Interactiva: Equip = Palou | Total = 90</p>
+                </div>
+            </div>
+
+            <!-- Global Action Bar -->
+            <div class="flex items-center space-x-2">
+                <label for="excel-file-input" class="cursor-pointer bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition flex items-center space-x-2 shadow-sm">
+                    <i class="fa-solid fa-file-excel"></i>
+                    <span>Cargar Excel / CSV</span>
+                </label>
+                <input type="file" id="excel-file-input" accept=".xlsx, .xls, .csv" class="hidden" onchange="handleFileSelect(event)">
+
+                <button onclick="exportPivotToCSV()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-2 rounded-lg text-sm font-medium transition flex items-center space-x-2">
+                    <i class="fa-solid fa-download"></i>
+                    <span class="hidden sm:inline">Exportar Resumen</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="max-w-7xl mx-auto px-4 py-6 flex-1 w-full flex flex-col space-y-6">
+
+        <!-- Upload & Status Banner -->
+        <div id="drop-zone" class="border-2 border-dashed border-indigo-200 bg-indigo-50/50 rounded-xl p-4 text-center hover:border-indigo-400 transition cursor-pointer" onclick="document.getElementById('excel-file-input').click()">
+            <div class="flex flex-col sm:flex-row items-center justify-center space-y-2 sm:space-y-0 sm:space-x-4">
+                <div class="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600">
+                    <i class="fa-solid fa-cloud-arrow-up text-lg"></i>
+                </div>
+                <div class="text-left">
+                    <p class="text-sm font-semibold text-slate-700">Haz clic o arrastra aquí tu fichero <span class="text-indigo-600 font-bold">bitllespalou.xlsx</span></p>
+                    <p class="text-xs text-slate-500" id="file-name">Datos simulados de prueba precargados por defecto.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Filter Controls & Summary Stats -->
+        <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            
+            <!-- Filters -->
+            <div class="flex flex-wrap items-center gap-3">
+                <div class="flex flex-col">
+                    <label class="text-[11px] font-bold text-slate-500 uppercase mb-1">Equip (Filtrado)</label>
+                    <div class="relative">
+                        <input type="text" id="filter-equip" value="palou" oninput="applyFiltersAndBuildPivot()" class="bg-slate-50 border border-slate-300 rounded-lg pl-8 pr-3 py-1.5 text-sm font-semibold text-indigo-700 focus:ring-2 focus:ring-indigo-500 focus:outline-none w-36">
+                        <i class="fa-solid fa-shield-halved absolute left-2.5 top-2.5 text-slate-400 text-xs"></i>
+                    </div>
+                </div>
+
+                <div class="flex flex-col">
+                    <label class="text-[11px] font-bold text-slate-500 uppercase mb-1">Total (Puntos)</label>
+                    <div class="relative">
+                        <input type="text" id="filter-total" value="90" oninput="applyFiltersAndBuildPivot()" class="bg-slate-50 border border-slate-300 rounded-lg pl-8 pr-3 py-1.5 text-sm font-semibold text-indigo-700 focus:ring-2 focus:ring-indigo-500 focus:outline-none w-28">
+                        <i class="fa-solid fa-bullseye absolute left-2.5 top-2.5 text-slate-400 text-xs"></i>
+                    </div>
+                </div>
+
+                <div class="flex flex-col">
+                    <label class="text-[11px] font-bold text-slate-500 uppercase mb-1">Buscar Jugador</label>
+                    <div class="relative">
+                        <input type="text" id="filter-jugador" placeholder="Nombre..." oninput="applyFiltersAndBuildPivot()" class="bg-slate-50 border border-slate-300 rounded-lg pl-8 pr-3 py-1.5 text-sm font-medium text-slate-700 focus:ring-2 focus:ring-indigo-500 focus:outline-none w-44">
+                        <i class="fa-solid fa-magnifying-glass absolute left-2.5 top-2.5 text-slate-400 text-xs"></i>
+                    </div>
+                </div>
+
+                <div class="flex items-end mb-0.5">
+                    <button onclick="resetFilters()" class="text-xs text-slate-500 hover:text-indigo-600 underline font-medium px-2 py-1">
+                        Restablecer
+                    </button>
+                </div>
+            </div>
+
+            <!-- Stats Badge & Density Toggle -->
+            <div class="flex items-center space-x-4 border-t md:border-t-0 pt-3 md:pt-0 border-slate-100">
+                <!-- Density toggle buttons -->
+                <div class="bg-slate-100 p-1 rounded-lg flex items-center space-x-1">
+                    <button id="btn-density-compact" onclick="setDensity('compact')" class="px-2.5 py-1 text-xs font-semibold rounded-md bg-white shadow-xs text-indigo-600 transition">Compacta</button>
+                    <button id="btn-density-normal" onclick="setDensity('normal')" class="px-2.5 py-1 text-xs font-semibold rounded-md text-slate-600 hover:text-slate-900 transition">Normal</button>
+                </div>
+
+                <div class="flex items-center space-x-3 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200">
+                    <div class="text-right">
+                        <span class="block text-[10px] text-slate-400 font-bold uppercase">Registros 90</span>
+                        <span id="stat-total-filtered" class="text-base font-extrabold text-indigo-600">0</span>
+                    </div>
+                    <span class="text-slate-300">/</span>
+                    <div class="text-right">
+                        <span class="block text-[10px] text-slate-400 font-bold uppercase">Total Fichero</span>
+                        <span id="stat-total-raw" class="text-sm font-bold text-slate-600">0</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Pivot Table Card -->
+        <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col flex-1">
+            <div class="p-4 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                <div class="flex items-center space-x-2">
+                    <i class="fa-solid fa-table text-indigo-600"></i>
+                    <h2 class="font-bold text-slate-800 text-sm">Tabla Dinámica: Jugador vs Temporada</h2>
+                </div>
+                <div class="text-xs text-slate-500">
+                    <i class="fa-solid fa-hand-pointer text-indigo-500 mr-1"></i> Haz clic en <span class="font-semibold text-slate-700">cualquier casilla</span> (incluidas filas/columnas total) para ver detalles.
+                </div>
+            </div>
+
+            <div class="table-container overflow-x-auto overflow-y-auto max-h-[600px] flex-1" id="pivot-table-wrapper">
+                <!-- Pivot Table renders dynamically -->
+            </div>
+        </div>
+    </main>
+
+    <!-- Detail Drill-Down Modal -->
+    <div id="detail-modal" class="fixed inset-0 z-50 hidden modal-backdrop flex items-center justify-center p-2 sm:p-4">
+        <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-6xl w-full max-h-[96vh] flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200">
+            <!-- Modal Header -->
+            <div class="px-5 py-3.5 bg-slate-900 text-white flex items-center justify-between">
+                <div>
+                    <h3 id="modal-title" class="text-base font-bold">Detalle de Registros</h3>
+                    <p id="modal-subtitle" class="text-xs text-slate-400">Registros individuales correspondientes a la casilla seleccionada</p>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <button id="modal-export-btn" onclick="exportModalSelectionToPDF()" class="bg-red-600 hover:bg-red-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition flex items-center space-x-1.5 shadow-sm">
+                        <i class="fa-solid fa-file-pdf text-sm"></i>
+                        <span>Exportar Selección (PDF)</span>
+                    </button>
+                    <button onclick="closeModal()" class="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-300 hover:text-white transition">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Modal Body / Table (Maximized vertical space with ultra-compact padding) -->
+            <div class="p-3 sm:p-4 overflow-y-auto flex-1 table-container">
+                <div class="overflow-x-auto border border-slate-200 rounded-lg">
+                    <table class="w-full text-left border-collapse modal-compact-table">
+                        <thead class="sticky top-0 z-10 shadow-xs">
+                            <tr class="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
+                                <th class="p-2 border-r border-slate-200">Data (ddmmaa)</th>
+                                <th class="p-2 border-r border-slate-200">Jugador</th>
+                                <th class="p-2 text-center border-r border-slate-200">NP (Nº Partida)</th>
+                                <th class="p-2 border-r border-slate-200">Partit</th>
+                                <th class="p-2 text-center border-r border-slate-200">Totalc / Total</th>
+                                <th class="p-2 text-center border-r border-slate-200">Ordre</th>
+                                <th class="p-2 text-center">Punts</th>
+                            </tr>
+                        </thead>
+                        <tbody id="modal-table-body" class="divide-y divide-slate-200 bg-white">
+                            <!-- Rows injected dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Modal Footer -->
+            <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
+                <span id="modal-count" class="text-xs font-semibold text-slate-500">0 registros</span>
+                <div class="flex items-center space-x-2">
+                    <button onclick="exportModalSelectionToPDF()" class="bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-xs font-semibold px-3 py-1.5 rounded-lg transition flex items-center space-x-1">
+                        <i class="fa-solid fa-file-pdf"></i>
+                        <span>Descargar PDF para Jugador</span>
+                    </button>
+                    <button onclick="closeModal()" class="bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold px-4 py-1.5 rounded-lg transition">
+                        Cerrar
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Application Script Logic -->
+    <script>
+        let rawData = [];
+        let filteredData = [];
+        let currentModalItems = []; // Keeps track of currently viewed modal records for export
+        let tableDensity = 'compact'; // 'compact' | 'normal'
+
+        // Sample initial dataset representing bitllespalou.xlsx
+        const sampleData = [
+            { ddmmaa: "151023", jugadors: "Casoliva", np: 1, partit: "cerverapalou", totalc: 90, ordre: 1, punts: 0.25, equip: "palou", temporada: "2023-2024" },
+            { ddmmaa: "221023", jugadors: "casoliva", np: 1, partit: "paloutarrega", totalc: 90, ordre: 1, punts: 0.00, equip: "Palou", temporada: "2023-2024" },
+            { ddmmaa: "051123", jugadors: "CASOLIVA", np: 2, partit: "palousolsona", totalc: 90, ordre: 1, punts: 0.40, equip: "PALOU", temporada: "2023-2024" },
+            { ddmmaa: "121123", jugadors: "Casoliva", np: 1, partit: "paloutarrega", totalc: 90, ordre: 1, punts: 0.40, equip: "palou", temporada: "2022-2023" },
+            { ddmmaa: "191123", jugadors: "Casoliva", np: 3, partit: "vallverdpalou", totalc: 90, ordre: 1, punts: 0.40, equip: "palou", temporada: "2022-2023" },
+            { ddmmaa: "031223", jugadors: "Mayoral", np: 1, partit: "solsonapalou", totalc: 90, ordre: 1, punts: 0.40, equip: "palou", temporada: "2023-2024" },
+            { ddmmaa: "101223", jugadors: "mayoral", np: 2, partit: "palouponts", totalc: 90, ordre: 1, punts: 0.40, equip: "Palou", temporada: "2023-2024" },
+            { ddmmaa: "171223", jugadors: "MAYORAL", np: 2, partit: "entrenament", totalc: 90, ordre: 10, punts: 0.00, equip: "PALOU", temporada: "2023-2024" },
+            { ddmmaa: "140124", jugadors: "Marti", np: 2, partit: "paloucervera", totalc: 90, ordre: 2, punts: 0.35, equip: "palou", temporada: "2021-2022" },
+            { ddmmaa: "210124", jugadors: "Marti", np: 1, partit: "paloutarrega", totalc: 90, ordre: 1, punts: 0.40, equip: "palou", temporada: "2022-2023" },
+            { ddmmaa: "280124", jugadors: "Ramon", np: 1, partit: "palouguissona", totalc: 84, ordre: 1, punts: 0.10, equip: "palou", temporada: "2023-2024" },
+            { ddmmaa: "040224", jugadors: "Pere", np: 2, partit: "tarregacervera", totalc: 90, ordre: 1, punts: 0.40, equip: "tarrega", temporada: "2023-2024" }
+        ];
+
+        window.onload = function() {
+            setupDragAndDrop();
+            processRawData(sampleData);
+        };
+
+        function setDensity(mode) {
+            tableDensity = mode;
+            const btnCompact = document.getElementById('btn-density-compact');
+            const btnNormal = document.getElementById('btn-density-normal');
+            
+            if (mode === 'compact') {
+                btnCompact.className = "px-2.5 py-1 text-xs font-semibold rounded-md bg-white shadow-xs text-indigo-600 transition";
+                btnNormal.className = "px-2.5 py-1 text-xs font-semibold rounded-md text-slate-600 hover:text-slate-900 transition";
+            } else {
+                btnNormal.className = "px-2.5 py-1 text-xs font-semibold rounded-md bg-white shadow-xs text-indigo-600 transition";
+                btnCompact.className = "px-2.5 py-1 text-xs font-semibold rounded-md text-slate-600 hover:text-slate-900 transition";
+            }
+            renderPivotTable();
+        }
+
+        function setupDragAndDrop() {
+            const dropZone = document.getElementById('drop-zone');
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropZone.addEventListener(eventName, (e) => {
+                    e.preventDefault();
+                    dropZone.classList.add('border-indigo-500', 'bg-indigo-100/50');
+                }, false);
+            });
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropZone.addEventListener(eventName, (e) => {
+                    e.preventDefault();
+                    dropZone.classList.remove('border-indigo-500', 'bg-indigo-100/50');
+                }, false);
+            });
+            dropZone.addEventListener('drop', (e) => {
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    processFile(files[0]);
+                }
+            });
+        }
+
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (file) {
+                processFile(file);
+            }
+        }
+
+        function processFile(file) {
+            document.getElementById('file-name').textContent = `Fichero: ${file.name}`;
+            const reader = new FileReader();
+
+            reader.onload = function(e) {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const firstSheetName = workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[firstSheetName];
+                    const json = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+                    
+                    if (json.length === 0) {
+                        alert("El fichero no contiene datos legibles.");
+                        return;
+                    }
+                    processRawData(json);
+                } catch (err) {
+                    console.error(err);
+                    alert("Error al leer el archivo Excel/CSV. Asegúrate de que sea un formato válido.");
+                }
+            };
+
+            reader.readAsArrayBuffer(file);
+        }
+
+        // Normalize raw data keys robustly prioritizing real player names over numeric identifiers
+        function normalizeRowKeys(row) {
+            const normalized = {};
+            for (let key in row) {
+                const cleanKey = key.toString().trim().toLowerCase();
+                normalized[cleanKey] = row[key];
+            }
+
+            // Detect Player Name prioritizing explicit name columns over numeric 'np'
+            let rawJugador = row.jugadors || row.jugador || row.nom || row['nom jugador'] || normalized.jugadors || normalized.jugador || normalized.nom || normalized['nom jugador'];
+            if (!rawJugador || !isNaN(String(rawJugador).trim())) {
+                rawJugador = row.jugadors || row.jugador || row.nom || 'Desconocido';
+            }
+
+            // Formatear y unificar el nombre del jugador (capitalizar palabras: "casoliva" / "CASOLIVA" -> "Casoliva")
+            let formattedJugador = String(rawJugador)
+                .trim()
+                .toLowerCase()
+                .replace(/\s+/g, ' ')
+                .replace(/(^|\s)\S/g, l => l.toUpperCase());
+
+            // Detect NP (Número de partida)
+            const npVal = row.np !== undefined ? row.np : (row.NP !== undefined ? row.NP : normalized.np);
+
+            // Detect Fecha/Date (ddmmaa, ddmmaaaa, data, fecha, date)
+            let rawDate = row.ddmmaa || row.DDMMAA || row.ddmmaaaa || row.DDMMAAAA || row.fecha || row.FECHA || row.data || row.DATA || row.date || row.DATE || normalized.ddmmaa || normalized.ddmmaaaa || normalized.fecha || normalized.data || normalized.date;
+            
+            // Format Excel serial date if necessary
+        let formattedDate = '';
+        if (rawDate !== undefined && rawDate !== null && rawDate !== '') {
+            if (typeof rawDate === 'number' && rawDate > 20000) {
+                const dateObj = XLSX.SSF.parse_date_code(rawDate);
+                if (dateObj) {
+                    const dd = String(dateObj.d).padStart(2, '0');
+                    const mm = String(dateObj.m).padStart(2, '0');
+                    const yyyy = dateObj.y;
+                    formattedDate = `${dd}/${mm}/${yyyy}`;
+                } else {
+                    formattedDate = String(rawDate);
+                }
+            } else {
+                let strDate = String(rawDate).trim();
+                // Si la fecha viene en formato de 8 dígitos continuos (DDMMAAAA), insertar barras DD/MM/AAAA
+                if (/^\d{8}$/.test(strDate)) {
+                    formattedDate = `${strDate.slice(0, 2)}/${strDate.slice(2, 4)}/${strDate.slice(4, 8)}`;
+                } else if (/^\d{6}$/.test(strDate)) {
+                    // Si viene en formato DDMMAA (6 dígitos)
+                    formattedDate = `${strDate.slice(0, 2)}/${strDate.slice(2, 4)}/20${strDate.slice(4, 6)}`;
+                } else {
+                    formattedDate = strDate;
+                }
+            }
+        }
+
+        const equipVal = row.equip !== undefined ? row.equip : (row.equipo !== undefined ? row.equipo : (normalized.equip !== undefined ? normalized.equip : normalized.equipo));
+            const totalVal = row.total !== undefined ? row.total : (row.totalc !== undefined ? row.totalc : (normalized.total !== undefined ? normalized.total : normalized.totalc));
+            const temporadaVal = row.temporada !== undefined ? row.temporada : (row.anys !== undefined ? row.anys : (row.año !== undefined ? row.año : (row.any !== undefined ? row.any : (normalized.temporada !== undefined ? normalized.temporada : (normalized.anys !== undefined ? normalized.anys : normalized.any)))));
+            const partitVal = row.partit !== undefined ? row.partit : (row.partido !== undefined ? row.partido : (normalized.partit !== undefined ? normalized.partit : normalized.partido));
+            const ordreVal = row.ordre !== undefined ? row.ordre : (row.orden !== undefined ? row.orden : (normalized.ordre !== undefined ? normalized.ordre : normalized.orden));
+            const puntsVal = row.punts !== undefined ? row.punts : (row.puntos !== undefined ? row.puntos : (normalized.punts !== undefined ? normalized.punts : normalized.puntos));
+
+            return {
+                ddmmaaaa: formattedDate,
+                jugador: formattedJugador,
+                np: npVal !== undefined && npVal !== null ? String(npVal).trim() : '',
+                partit: partitVal !== undefined && partitVal !== null ? String(partitVal).trim() : '',
+                totalc: totalVal,
+                ordre: ordreVal !== undefined && ordreVal !== null ? ordreVal : '',
+                punts: puntsVal !== undefined && puntsVal !== null ? puntsVal : '',
+                equip: equipVal !== undefined && equipVal !== null ? String(equipVal).trim() : '',
+                temporada: temporadaVal !== undefined && temporadaVal !== null ? String(temporadaVal).trim() : 'Sin Temporada',
+                originalRow: row
+            };
+        }
+
+        function processRawData(data) {
+            rawData = data.map(normalizeRowKeys);
+            document.getElementById('stat-total-raw').textContent = rawData.length;
+            applyFiltersAndBuildPivot();
+        }
+
+        // Apply Filters (Equip case-insensitive & Total = 90)
+        function applyFiltersAndBuildPivot() {
+            const equipFilter = document.getElementById('filter-equip').value.trim().toLowerCase();
+            const totalFilter = document.getElementById('filter-total').value.trim();
+            const jugadorFilter = document.getElementById('filter-jugador').value.trim().toLowerCase();
+
+            filteredData = rawData.filter(item => {
+                // Filter by equip (case insensitive)
+                if (equipFilter) {
+                    const itemEquip = (item.equip || '').toLowerCase();
+                    if (itemEquip !== equipFilter) return false;
+                }
+
+                // Filter by total / totalc
+                if (totalFilter !== '') {
+                    const itemTotal = item.totalc;
+                    if (itemTotal === undefined || itemTotal === null || String(itemTotal).trim() !== totalFilter) {
+                        return false;
+                    }
+                }
+
+                // Filter by jugador search
+                if (jugadorFilter) {
+                    const itemJugador = (item.jugador || '').toLowerCase();
+                    if (!itemJugador.includes(jugadorFilter)) return false;
+                }
+
+                return true;
+            });
+
+            document.getElementById('stat-total-filtered').textContent = filteredData.length;
+            renderPivotTable();
+        }
+
+        function resetFilters() {
+            document.getElementById('filter-equip').value = 'palou';
+            document.getElementById('filter-total').value = '90';
+            document.getElementById('filter-jugador').value = '';
+            applyFiltersAndBuildPivot();
+        }
+
+        // Render Pivot Table (Rows: Jugador, Columns: Temporada)
+        function renderPivotTable() {
+            const wrapper = document.getElementById('pivot-table-wrapper');
+
+            if (filteredData.length === 0) {
+                wrapper.innerHTML = `
+                    <div class="text-center py-12 text-slate-400">
+                        <i class="fa-solid fa-folder-open text-4xl mb-3"></i>
+                        <p class="text-sm font-medium">No hay registros que coincidan con los filtros (equip = '${document.getElementById('filter-equip').value}', total = '${document.getElementById('filter-total').value}').</p>
+                    </div>
+                `;
+                return;
+            }
+
+            // Extract unique sorted players (rows) and seasons (columns)
+            const players = [...new Set(filteredData.map(d => d.jugador))].sort();
+            const seasons = [...new Set(filteredData.map(d => d.temporada))].sort();
+
+            // Build pivot matrix
+            const pivot = {}; // pivot[player][season] = array of items
+            players.forEach(p => {
+                pivot[p] = {};
+                seasons.forEach(s => {
+                    pivot[p][s] = [];
+                });
+            });
+
+            filteredData.forEach(item => {
+                if (pivot[item.jugador] && pivot[item.jugador][item.temporada]) {
+                    pivot[item.jugador][item.temporada].push(item);
+                }
+            });
+
+            const tableClass = tableDensity === 'compact' ? 'compact-table' : 'normal-table';
+            const textHeaderSize = tableDensity === 'compact' ? 'text-[11px]' : 'text-xs';
+
+            let html = `
+                <table class="w-full text-left border-collapse ${textHeaderSize} ${tableClass}">
+                    <thead>
+                        <tr class="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
+                            <th class="p-2 border-r border-slate-200 sticky left-0 bg-slate-100 z-10 min-w-[140px] shadow-xs">Jugador \\ Temporada</th>
+            `;
+
+            seasons.forEach(season => {
+                html += `<th class="p-2 text-center border-r border-slate-200 min-col-width cursor-pointer hover:bg-slate-200 transition whitespace-nowrap" onclick="showColumnDetail('${season}')" title="Ver columna ${season}">${season}</th>`;
+            });
+
+            html += `
+                            <th class="p-2 text-center bg-indigo-50 text-indigo-900 min-col-width">Total Fila</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-200 bg-white">
+            `;
+
+            let grandTotalCount = 0;
+            const seasonTotals = {};
+            seasons.forEach(s => seasonTotals[s] = 0);
+
+            players.forEach(player => {
+                let rowTotalCount = 0;
+                html += `<tr class="hover:bg-slate-50/80 transition">`;
+                // Row Header (Player)
+                html += `<td class="p-2 font-semibold text-slate-800 border-r border-slate-200 sticky left-0 bg-white z-10 cursor-pointer hover:text-indigo-600 transition truncate max-w-[150px]" onclick="showPlayerDetail('${escapeQuotes(player)}')"><i class="fa-solid fa-user text-slate-400 mr-1 text-[9px]"></i> ${player}</td>`;
+
+                seasons.forEach(season => {
+                    const cellItems = pivot[player][season];
+                    const count = cellItems.length;
+                    rowTotalCount += count;
+                    seasonTotals[season] += count;
+                    grandTotalCount += count;
+
+                    const cellDataJson = encodeURIComponent(JSON.stringify(cellItems));
+                    const cellClass = count > 0 ? 'text-indigo-600 font-bold hover:bg-indigo-50 cursor-pointer' : 'text-slate-300';
+
+                    html += `<td class="p-2 text-center border-r border-slate-200 ${cellClass}" onclick="openDetailModal('Celda: ${escapeQuotes(player)} / ${season}', '${cellDataJson}')">${count > 0 ? count : '-'}</td>`;
+                });
+
+                // Row Total
+                const rowItems = filteredData.filter(d => d.jugador === player);
+                const rowItemsJson = encodeURIComponent(JSON.stringify(rowItems));
+                html += `<td class="p-2 text-center font-bold text-indigo-900 bg-indigo-50/50 cursor-pointer hover:bg-indigo-100 transition" onclick="openDetailModal('Total Fila: ${escapeQuotes(player)}', '${rowItemsJson}')">${rowTotalCount}</td>`;
+                html += `</tr>`;
+            });
+
+            // Summary Footer (Column Totals)
+            html += `
+                    </tbody>
+                    <tfoot>
+                        <tr class="bg-indigo-50/80 font-bold text-indigo-900 border-t-2 border-slate-200">
+                            <td class="p-2 border-r border-slate-200 sticky left-0 bg-indigo-50 z-10 shadow-xs">Total Columna</td>
+            `;
+
+            seasons.forEach(season => {
+                const seasonItems = filteredData.filter(d => d.temporada === season);
+                const seasonItemsJson = encodeURIComponent(JSON.stringify(seasonItems));
+                html += `<td class="p-2 text-center border-r border-slate-200 cursor-pointer hover:bg-indigo-100 transition" onclick="openDetailModal('Total Temporada: ${season}', '${seasonItemsJson}')">${seasonTotals[season]}</td>`;
+            });
+
+            // Grand Total
+            const allItemsJson = encodeURIComponent(JSON.stringify(filteredData));
+            html += `<td class="p-2 text-center bg-indigo-100 text-indigo-950 font-black cursor-pointer hover:bg-indigo-200 transition" onclick="openDetailModal('Gran Total General', '${allItemsJson}')">${grandTotalCount}</td>`;
+
+            html += `
+                        </tr>
+                    </tfoot>
+                </table>
+            `;
+
+            wrapper.innerHTML = html;
+        }
+
+        // Helper to escape quotes for HTML onclick strings
+        function escapeQuotes(str) {
+            if (str === null || str === undefined) return '';
+            return String(str).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+        }
+
+        // Show details for a specific player
+        function showPlayerDetail(player) {
+            const items = filteredData.filter(d => d.jugador === player);
+            openDetailModal(`Registros del Jugador: ${player}`, encodeURIComponent(JSON.stringify(items)));
+        }
+
+        // Show details for a specific season column
+        function showColumnDetail(season) {
+            const items = filteredData.filter(d => d.temporada === season);
+            openDetailModal(`Registros de la Temporada: ${season}`, encodeURIComponent(JSON.stringify(items)));
+        }
+
+        // Open Drill-Down Modal
+        function openDetailModal(title, encodedJson) {
+            const items = JSON.parse(decodeURIComponent(encodedJson));
+            currentModalItems = items; // Store selection for export
+            
+            document.getElementById('modal-title').textContent = title;
+            document.getElementById('modal-subtitle').textContent = `Mostrando ${items.length} registro(s) detallado(s)`;
+            document.getElementById('modal-count').textContent = `${items.length} registro(s) en total`;
+
+            const tbody = document.getElementById('modal-table-body');
+            if (items.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="7" class="p-4 text-center text-slate-400">No hay registros en esta selección.</td></tr>`;
+            } else {
+                tbody.innerHTML = items.map(item => `
+                    <tr class="hover:bg-indigo-50/50 transition">
+                        <td class="p-1.5 font-medium text-slate-800 border-r border-slate-100">${item.ddmmaaaa || '-'}</td>
+                        <td class="p-1.5 font-semibold text-indigo-700 border-r border-slate-100">${item.jugador || '-'}</td>
+                        <td class="p-1.5 text-center font-semibold text-slate-700 border-r border-slate-100">${item.np || '-'}</td>
+                        <td class="p-1.5 border-r border-slate-100">${item.partit || '-'}</td>
+                        <td class="p-1.5 text-center font-bold text-slate-900 border-r border-slate-100">${item.totalc !== undefined && item.totalc !== null ? item.totalc : '-'}</td>
+                        <td class="p-1.5 text-center border-r border-slate-100">${item.ordre !== undefined && item.ordre !== null ? item.ordre : '-'}</td>
+                        <td class="p-1.5 text-center font-semibold text-emerald-700">${item.punts !== undefined && item.punts !== null ? item.punts : '-'}</td>
+                    </tr>
+                `).join('');
+            }
+
+            document.getElementById('detail-modal').classList.remove('hidden');
+        }
+
+        // Export current modal selection to PDF for players
+        function exportModalSelectionToPDF() {
+            if (!currentModalItems || currentModalItems.length === 0) {
+                alert("No hay registros en esta casilla para exportar.");
+                return;
+            }
+
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+
+            const title = document.getElementById('modal-title').textContent;
+            
+            // Header configuration
+            doc.setFontSize(16);
+            doc.setTextColor(30, 41, 59);
+            doc.text("Analizador Bitlles Palou - Informe de Jugador", 14, 15);
+            
+            doc.setFontSize(11);
+            doc.setTextColor(71, 85, 105);
+            doc.text(`Filtro: ${title}`, 14, 23);
+            doc.text(`Total de tiradas de 90 puntos: ${currentModalItems.length}`, 14, 29);
+
+            // Table headers and data
+            const headers = [["Data (ddmmaa)", "Jugador", "NP", "Partit", "Total", "Ordre", "Punts"]];
+            const data = currentModalItems.map(item => [
+                item.ddmmaaaa || '-',
+                item.jugador || '-',
+                item.np !== undefined && item.np !== null ? item.np : '-',
+                item.partit || '-',
+                item.totalc !== undefined && item.totalc !== null ? item.totalc : '-',
+                item.ordre !== undefined && item.ordre !== null ? item.ordre : '-',
+                item.punts !== undefined && item.punts !== null ? item.punts : '-'
+            ]);
+
+            // AutoTable styling
+            doc.autoTable({
+                startY: 34,
+                head: headers,
+                body: data,
+                theme: 'striped',
+                headStyles: {
+                    fillColor: [79, 70, 229],
+                    textColor: [255, 255, 255],
+                    fontStyle: 'bold',
+                    fontSize: 9
+                },
+                bodyStyles: {
+                    fontSize: 8,
+                    textColor: [51, 65, 85]
+                },
+                columnStyles: {
+                    2: { halign: 'center' },
+                    4: { halign: 'center', fontStyle: 'bold' },
+                    5: { halign: 'center' },
+                    6: { halign: 'center' }
+                }
+            });
+
+            // Save PDF
+            const cleanTitle = title.replace(/[^a-zA-Z0-9_-]/g, '_');
+            doc.save(`Bitlles_Palou_${cleanTitle}.pdf`);
+        }
+
+        // Close Modal
+        function closeModal() {
+            document.getElementById('detail-modal').classList.add('hidden');
+        }
+
+        // Close modal on background click
+        window.onclick = function(event) {
+            const modal = document.getElementById('detail-modal');
+            if (event.target === modal) {
+                closeModal();
+            }
+        }
+
+        // Export Pivot Table summary to CSV
+        function exportPivotToCSV() {
+            if (filteredData.length === 0) {
+                alert("No hay datos para exportar.");
+                return;
+            }
+
+            const players = [...new Set(filteredData.map(d => d.jugador))].sort();
+            const seasons = [...new Set(filteredData.map(d => d.temporada))].sort();
+
+            let csvContent = "data:text/csv;charset=utf-8,Jugador/Temporada," + seasons.join(",") + ",Total\n";
+
+            players.forEach(player => {
+                let row = `"${player}"`;
+                let rowTotal = 0;
+                seasons.forEach(season => {
+                    const count = filteredData.filter(d => d.jugador === player && d.temporada === season).length;
+                    rowTotal += count;
+                    row += `,${count}`;
+                });
+                row += `,${rowTotal}\n`;
+                csvContent += row;
+            });
+
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", "tabla_dinamica_palou_total90.csv");
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+    </script>
+</body>
+</html>
