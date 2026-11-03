@@ -138,8 +138,8 @@ try:
                     r_idx, c_idx = int(rows[0]), int(cols[0])
 
         if r_idx is not None and c_idx is not None:
-            # Compensar la columna de índice (nombres de jugadores) restando 1 al índice de columna del evento
-            adjusted_c_idx = c_idx - 1
+            # Usar c_idx directamente sin restar 1
+            adjusted_c_idx = c_idx
 
             if 0 <= r_idx < len(tabla_final.index) and 0 <= adjusted_c_idx < len(tabla_final.columns):
                 row_label = str(tabla_final.index[r_idx])
@@ -151,12 +151,11 @@ try:
                 if row_label != "Total Resumen":
                     detalle_df = detalle_df[detalle_df['__jugador_key__'] == row_label.lower()]
 
-                # 2. Filtrar por Órden de forma exacta a partir de la columna real seleccionada
+                # 2. Filtrar por Órden de forma robusta
                 if col_label != "Total Resumen":
                     try:
-                        original_col_type = filtered_df[col_ordre].dtype
-                        val_conv = original_col_type.type(col_label)
-                        detalle_df = detalle_df[detalle_df[col_ordre] == val_conv]
+                        num_val = pd.to_numeric(col_label)
+                        detalle_df = detalle_df[(detalle_df[col_ordre] == num_val) | (detalle_df[col_ordre].astype(str) == col_label)]
                     except Exception:
                         detalle_df = detalle_df[detalle_df[col_ordre].astype(str) == col_label]
 
