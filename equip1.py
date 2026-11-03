@@ -58,6 +58,10 @@ try:
     if col_jugador and col_ordre and col_total and not filtered_df.empty:
         # Asegurar tipo numérico en total y estandarizar clave de jugador
         filtered_df[col_total] = pd.to_numeric(filtered_df[col_total], errors='coerce')
+        
+        # Convertir la columna de ordre de forma segura a numérico si es posible, o mantenerla limpia
+        filtered_df[col_ordre] = pd.to_numeric(filtered_df[col_ordre], errors='coerce')
+        
         filtered_df['__jugador_key__'] = filtered_df[col_jugador].astype(str).str.strip().str.lower()
 
         # --- CONFECCIÓN DE LA TABLA DINÁMICA ---
@@ -78,8 +82,12 @@ try:
         resumen_ordre_count = filtered_df.groupby(col_ordre)[col_total].count()
 
         display_data = []
-        # Ordenar las columnas de orden de forma numérica para que 9 y 10 vayan en su sitio correcto
-        col_names = sorted(list(pivot_mean.columns), key=lambda x: (str(type(x)), x))
+        # Ordenar las columnas numéricamente de forma segura (ej: 1, 2, 3... 9, 10)
+        raw_cols = list(pivot_mean.columns)
+        try:
+            col_names = sorted(raw_cols, key=lambda x: float(x))
+        except Exception:
+            col_names = sorted(raw_cols, key=lambda x: str(x))
 
         for jugador_key in orden_jugadores:
             row_dict = {"Jugador": str(jugador_key).upper()}
@@ -153,7 +161,7 @@ try:
                     if row_label != "Total Resumen":
                         detalle_df = detalle_df[detalle_df['__jugador_key__'] == row_label.lower()]
 
-                    # 2. Filtrar por Órden o por Total Resumen de forma infalible
+                    # 2. Filtrar por Órden de forma totalmente blindada (evitando errores en 9, 10 y Total Resumen)
                     if col_label != "Total Resumen":
                         matched_val = None
                         for orig_c in col_names:
@@ -165,13 +173,15 @@ try:
                             detalle_df = detalle_df[detalle_df[col_ordre] == matched_val]
                         else:
                             try:
-                                num_val = pd.to_numeric(col_label)
+                                num_val = float(col_label)
+                                if num_val.is_integer():
+                                    num_val = int(num_val)
                                 detalle_df = detalle_df[detalle_df[col_ordre] == num_val]
                             except Exception:
                                 detalle_df = detalle_df[detalle_df[col_ordre].astype(str) == col_label]
-                    # Si col_label == "Total Resumen", no filtramos por orden (mantiene todos los órdenes del jugador o globales)
+                    # Si se hace clic en "Total Resumen", no se filtra por orden, mostrando todos los registros acumulados.
 
-                    # 3. Ordenar por Fecha (ddmmaa o fecha) Descendentemente
+                    # 3. Ordenar por Fecha (ddmmaa) Descendentemente
                     col_fecha = next((c for c in ['ddmmaa', 'fecha'] if c in detalle_df.columns), None)
                     if col_fecha:
                         detalle_df[col_fecha] = pd.to_datetime(detalle_df[col_fecha], errors='coerce')
