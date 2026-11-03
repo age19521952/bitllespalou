@@ -17,6 +17,14 @@ try:
     # Normalitzar noms de columnes a minúscules
     df.columns = [str(c).strip().lower() for c in df.columns]
 
+    # --- FORMATRE DE DATA ROBUST (dd/mm/aaaa) ---
+    col_fecha_orig = next((c for c in ['ddmmaa', 'fecha', 'data', 'date'] if c in df.columns), None)
+    if col_fecha_orig:
+        # Convertir a datetime gestionando errores y formatos de Excel
+        parsed_dates = pd.to_datetime(df[col_fecha_orig], errors='coerce')
+        # Formatear a string dd/mm/aaaa, rellenando los valores nulos/NaT con "—"
+        df[col_fecha_orig] = parsed_dates.dt.strftime('%d/%m/%Y').fillna('—')
+    
     # --- ZONA DE FILTROS ---
     col1, col2, col3 = st.columns(3)
     
@@ -137,7 +145,6 @@ try:
 
         final_display_df = pd.DataFrame(table_data)
 
-        # Mostrem la taula neta
         st.dataframe(final_display_df, use_container_width=True, hide_index=True)
 
         st.markdown("---")
@@ -147,7 +154,7 @@ try:
         sel_jugador_opt = col_sel1.selectbox("Selecciona Jugador:", options=["-- Tria un jugador --"] + jugadorsList + ["Total Resumen"])
         sel_ordre_opt = col_sel2.selectbox("Selecciona Ordre / Resum:", options=["Total Resumen"] + [str(o) for o in ordresList])
 
-        # --- MOSTRAR RESULTATS DEL DETALL AUTOMÀTICAMENT SENSE BOTÓ ---
+        # --- MOSTRAR RESULTATS DEL DETALL ---
         if sel_jugador_opt and sel_jugador_opt != "-- Tria un jugador --":
             detalle_df = filtered_df.copy()
             if sel_jugador_opt != "Total Resumen":
@@ -156,17 +163,12 @@ try:
             if sel_ordre_opt != "Total Resumen":
                 detalle_df = detalle_df[detalle_df['__ordre_str__'] == str(sel_ordre_opt)]
 
-            col_fecha = next((c for c in ['ddmmaa', 'fecha'] if c in detalle_df.columns), None)
-            if col_fecha:
-                detalle_df[col_fecha] = pd.to_datetime(detalle_df[col_fecha], errors='coerce')
-                detalle_df = detalle_df.sort_values(by=col_fecha, ascending=False)
-
             st.markdown(f"### 📋 Desglossament | Jugador: [{sel_jugador_opt}] - Ordre: [{sel_ordre_opt}]")
-            st.caption(f"Registres trobats: {len(detalle_df)}")
+            st.caption(f"Registros trobats: {len(detalle_df)}")
 
             if not detalle_df.empty:
                 todas_columnas = [c for c in detalle_df.columns if c not in ['__jugador_key__', '__ordre_str__']]
-                cols_defecto = [c for c in [col_fecha, col_jugador, col_ordre, col_total, 'jornada', 'temporada'] if c in todas_columnas]
+                cols_defecto = [c for c in [col_fecha_orig, col_jugador, col_ordre, col_total, 'jornada', 'temporada'] if c in todas_columnas]
 
                 selected_display_cols = st.multiselect(
                     "⚙️ Triar variables a mostrar:",
