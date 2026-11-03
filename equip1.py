@@ -165,21 +165,16 @@ try:
             st.caption(f"Registros trobats: {len(detalle_df)}")
 
             if not detalle_df.empty:
-                # Ordenar las columnas estrictamente como en la foto de referencia
+                # Definimos estrictamente solo las columnas que queremos mostrar en ese orden exacto
                 desired_order = [col_fecha_orig, 'temporada', 'jornada', 'np', 'partit', col_jugador, col_total, 'totalc', 'punts', col_ordre]
-                todas_columnas = [c for c in detalle_df.columns if c not in ['__jugador_key__', '__ordre_str__']]
                 
-                # Filtrar solo las que existan realmente en el DataFrame para evitar errores
-                default_cols_ordered = [c for c in desired_order if c and c in todas_columnas]
-                # Añadir cualquier otra columna restante que no estuviera en la lista fija
-                for c in todas_columnas:
-                    if c not in default_cols_ordered:
-                        default_cols_ordered.append(c)
+                # Nos aseguramos de coger únicamente las que existan realmente en el DataFrame y descartar el resto (t1, t2, t3...)
+                final_cols_to_show = [c for c in desired_order if c and c in detalle_df.columns]
 
                 selected_display_cols = st.multiselect(
                     "⚙️ Triar variables a mostrar:",
-                    options=default_cols_ordered,
-                    default=default_cols_ordered,
+                    options=final_cols_to_show,
+                    default=final_cols_to_show,
                     key="multiselect_detalle_casilla_final"
                 )
 
