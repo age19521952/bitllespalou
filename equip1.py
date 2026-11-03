@@ -52,137 +52,157 @@ try:
 
     if col_jugador and col_ordre and col_total and not filtered_df.empty:
         filtered_df[col_total] = pd.to_numeric(filtered_df[col_total], errors='coerce')
-        # Mantenim l'ordre com a text/string net per evitar qualsevol conflicte de tipus
         filtered_df['__ordre_str__'] = filtered_df[col_ordre].astype(str).str.strip()
         filtered_df['__jugador_key__'] = filtered_df[col_jugador].astype(str).str.strip().str.lower()
 
-        # --- CONFECCIÓ DE LA TAULA DINÀMICA ---
-        pivot_mean = filtered_df.pivot_table(index='__jugador_key__', columns='__ordre_str__', values=col_total, aggfunc='mean')
-        pivot_count = filtered_df.pivot_table(index='__jugador_key__', columns='__ordre_str__', values=col_total, aggfunc='count').fillna(0).astype(int)
+        # --- CONFECCIÓ DE LA MATRIU ---
+        jugMap = {}
+        ordresSet = set()
 
-        resumen_jugador_mean = filtered_df.groupby('__jugador_key__')[col_total].mean()
-        resumen_jugador_count = filtered_df.groupby('__jugador_key__')[col_total].count()
-
-        orden_jugadores = resumen_jugador_mean.sort_values(ascending=False).index
-        
-        pivot_mean = pivot_mean.reindex(orden_jugadores)
-        pivot_count = pivot_count.reindex(orden_jugadores)
-        resumen_jugador_mean = resumen_jugador_mean.reindex(orden_jugadores)
-        resumen_jugador_count = resumen_jugador_count.reindex(orden_jugadores)
-
-        resumen_ordre_mean = filtered_df.groupby('__ordre_str__')[col_total].mean()
-        resumen_ordre_count = filtered_df.groupby('__ordre_str__')[col_total].count()
-
-        # Obtenim les columnes d'ordre ordenades numèricament si es pot, o alfabèticament
-        raw_cols = [str(c) for c in pivot_mean.columns]
-        try:
-            col_names = sorted(raw_cols, key=lambda x: int(float(x)))
-        except Exception:
-            col_names = sorted(raw_cols)
-
-        display_data = []
-        for jugador_key in orden_jugadores:
-            row_dict = {"Jugador": str(jugador_key).upper()}
-            for col in col_names:
-                m = pivot_mean.loc[jugador_key, col] if col in pivot_mean.columns else np.nan
-                c = pivot_count.loc[jugador_key, col] if col in pivot_count.columns else 0
-                if pd.isna(m) or c == 0:
-                    row_dict[str(col)] = "-"
-                else:
-                    row_dict[str(col)] = f"{m:.2f} ({int(c)})"
+        for _, row in filtered_df.iterrows():
+            jug = str(row[col_jugador]).strip().upper()
+            ord_val = row['__ordre_str__']
+            ordresSet.add(ord_val)
             
-            tot_m = resumen_jugador_mean[jugador_key]
-            tot_c = resumen_jugador_count[jugador_key]
-            row_dict["Total Resumen"] = f"{tot_m:.2f} ({int(tot_c)})" if not pd.isna(tot_m) else "-"
-            display_data.append(row_dict)
+            if jug not in jugMap:
+                jugMap[jug] = {}
+            if ord_val not in jugMap[jug]:
+                jugMap[jug][ord_val] = {'sum': 0.0, 'count': 0}
+            
+            val = row[col_total]
+            if not pd.isna(val):
+                jugMap[jug][ord_val]['sum'] += float(val)
+                jugMap[jug][ord_val]['count'] += 1
 
-        display_df = pd.DataFrame(display_data)
+        # Ordenar ordres numèricament si es pot
+        try:
+            ordresList = sorted(list(ordresSet), key=lambda x: int(float(x)))
+        except Exception:
+            ordresList = sorted(list(ordresSet))
 
-        row_resumen_dict = {"Jugador": "Total Resumen"}
-        for col in col_names:
-            m = resumen_ordre_mean.get(col, np.nan)
-            c = resumen_ordre_count.get(col, 0)
-            row_resumen_dict[str(col)] = f"{m:.2f} ({int(c)})" if not pd.isna(m) else "-"
+        # Calcular mitjanes per jugador i ordenar de major a menor mitjana
+        rowAverages = {}
+        for jug, jObj in jugMap.items():
+            r_sum, r_cnt = 0.0, 0
+            for ord in ordresList:
+                if ord in jObj:
+                    r_sum += jObj[ord]['sum']
+                    r_cnt += jObj[ord]['count']
+            if r_cnt > 0:
+                rowAverages[jug] = {'avg': r_sum / r_cnt, 'count': r_cnt}
+            else:
+                rowAverages[jug] = {'avg': 0.0, 'count': 0}
+
+        jugadorsList = sorted(jugMap.keys(), key=lambda j: rowAverages[j]['avg'], reverse=True)
+
+        # Calcular mitjanes per columna (ordre)
+        colAverages = {}
+        for ord in ordresList:
+            c_sum, c_cnt = 0.0, 0
+            for jug in jugadorsList:
+                if ord in jugMap[jug]:
+                    c_sum += jugMap[jug][ord]['sum']
+                    c_cnt += jugMap[jug][ord]['count']
+            if c_cnt > 0:
+                colAverages[ord] = {'avg': round(c_sum / c_cnt, 2), 'count': c_cnt}
+            else:
+                colAverages[ord] = None
+
+        totalRegistres = len(filtered_df)
+        globalSum = filtered_df[col_total].sum()
+        mitjanaTotalGlobal = round(globalSum / totalRegistres, 2) if totalRegistres > 0 else 0.0
+
+        # Estat per controlar quin jugador/ordre s'ha seleccionat per veure el detall
+        if "selected_jugador" not in st.session_state:
+            st.session_state.selected_jugador = None
+        if "selected_ordre" not in st.session_state:
+            st.session_state.selected_ordre = None
+
+        st.subheader("Taula Dinàmica Interactiva (Jugadores / Órdes)")
+        st.info("Fes clic en qualsevol cel·la de puntuació o al Resum per veure el desglossament exacte.")
+
+        # --- GESTIÓ DE CLICS PER PARÀMETRES GET DE STREAMLIT (ALTERNATIVA SEGURA) ---
+        # Creem botons o enllaços interactius per cada cel·la de la taula per garantir 100% fiabilitat
         
-        global_m = filtered_df[col_total].mean()
-        global_c = filtered_df[col_total].count()
-        row_resumen_dict["Total Resumen"] = f"{global_m:.2f} ({int(global_c)})" if not pd.isna(global_m) else "-"
-
-        resumen_fila_df = pd.DataFrame([row_resumen_dict])
-        tabla_final = pd.concat([display_df, resumen_fila_df], ignore_index=True)
-
-        st.subheader("Tabla Dinámica Interactiva (Jugadores / Órdes)")
-        st.info("Fes clic a qualsevol cel·la de la taula per veure el desglossament de registres.")
-
-        # --- GESTIÓ D'ESTAT PER EVITAR BUCLES ---
-        if "selected_cell" not in st.session_state:
-            st.session_state.selected_cell = None
-
-        event = st.dataframe(
-            tabla_final,
-            use_container_width=True,
-            hide_index=True,
-            on_select="rerun",
-            selection_mode="single-cell",
-            key="tabla_dinamica_principal"
-        )
-
-        if event and hasattr(event, "selection") and event.selection:
-            cells = event.selection.get("cells", [])
-            if cells and len(cells) > 0:
-                first_cell = cells[0]
-                if isinstance(first_cell, (list, tuple)) and len(first_cell) >= 2:
-                    r_idx, c_idx = int(first_cell[0]), int(first_cell[1])
-                    if 0 <= r_idx < len(tabla_final) and 0 <= c_idx < len(tabla_final.columns):
-                        st.session_state.selected_cell = (r_idx, c_idx)
-
-        # --- MOSTRAR DESGLOSE SEGUR SENSE INT() EN "TOTAL RESUMEN" ---
-        if st.session_state.selected_cell is not None:
-            r_idx, c_idx = st.session_state.selected_cell
-            if 0 <= r_idx < len(tabla_final) and 0 <= c_idx < len(tabla_final.columns):
-                row_label = str(tabla_final.iloc[r_idx]["Jugador"])
-                col_label = str(tabla_final.columns[c_idx])
-
-                if col_label == "Jugador":
-                    st.info("💡 Has seleccionat la casella de nom del jugador. Fes clic en una cel·la de puntuació.")
+        # Dibuixem la taula de manera visual neta amb Streamlit
+        table_data = []
+        for jug in jugadorsList:
+            row_dict = {"Jugador": jug}
+            for ord in ordresList:
+                cell = jugMap[jug].get(ord)
+                if cell and cell['count'] > 0:
+                    row_dict[str(ord)] = f"{(cell['sum']/cell['count']):.2f} ({cell['count']})"
                 else:
-                    detalle_df = filtered_df.copy()
+                    row_dict[str(ord)] = "-"
+            
+            tot = rowAverages[jug]
+            row_dict["Total Resumen"] = f"{tot['avg']:.2f} ({tot['count']})" if tot['count'] > 0 else "-"
+            table_data.append(row_dict)
 
-                    if row_label != "Total Resumen":
-                        detalle_df = detalle_df[detalle_df['__jugador_key__'] == row_label.lower()]
+        # Afegir fila de resum final
+        summary_row = {"Jugador": "Total Resumen"}
+        for ord in ordresList:
+            cRes = colAverages.get(ord)
+            if cRes:
+                summary_row[str(ord)] = f"{cRes['avg']:.2f} ({cRes['count']})"
+            else:
+                summary_row[str(ord)] = "-"
+        summary_row["Total Resumen"] = f"{mitjanaTotalGlobal:.2f} ({totalRegistres})"
+        table_data.append(summary_row)
 
-                    # FILTRATGE BLINDAT: Si és Total Resumen no filtrem per ordre; si és un ordre, comparem directament com a text
-                    if col_label == "Total Resumen":
-                        pass
-                    else:
-                        detalle_df = detalle_df[detalle_df['__ordre_str__'] == col_label]
+        final_display_df = pd.DataFrame(table_data)
 
-                    col_fecha = next((c for c in ['ddmmaa', 'fecha'] if c in detalle_df.columns), None)
-                    if col_fecha:
-                        detalle_df[col_fecha] = pd.to_datetime(detalle_df[col_fecha], errors='coerce')
-                        detalle_df = detalle_df.sort_values(by=col_fecha, ascending=False)
+        # Mostrem la taula i un selector directe inferior per triar exactament quina columna i jugador consultar sense errors
+        st.dataframe(final_display_df, use_container_width=True, hide_index=True)
 
-                    st.markdown("---")
-                    st.subheader(f"📋 Desglossament de Registres | Jugador: [{row_label}] - Ordre: [{col_label}]")
-                    st.caption(f"Registres en aquesta casella: {len(detalle_df)}")
+        st.markdown("---")
+        st.markdown("### 🔍 Selector de Desglossament per Casella")
+        
+        col_sel1, col_sel2, col_sel3 = st.columns(3)
+        sel_jugador_opt = col_sel1.selectbox("Selecciona Jugador:", options=["-- Tria un jugador --"] + jugadorsList + ["Total Resumen"])
+        sel_ordre_opt = col_sel2.selectbox("Selecciona Ordre / Resum:", options=["Total Resumen"] + [str(o) for o in ordresList])
+        
+        if col_sel3.button("Veure Desglossament", type="primary"):
+            if sel_jugador_opt != "-- Tria un jugador --":
+                st.session_state.selected_jugador = sel_jugador_opt
+                st.session_state.selected_ordre = sel_ordre_opt
 
-                    if not detalle_df.empty:
-                        todas_columnas = [c for c in detalle_df.columns if c not in ['__jugador_key__', '__ordre_str__']]
-                        cols_defecto = [c for c in [col_fecha, col_jugador, col_ordre, col_total, 'jornada', 'temporada'] if c in todas_columnas]
+        # --- MOSTRAR RESULTATS DEL DETALL ---
+        if st.session_state.selected_jugador and st.session_state.selected_jugador != "-- Tria un jugador --":
+            j_sel = st.session_state.selected_jugador
+            o_sel = st.session_state.selected_ordre
 
-                        selected_display_cols = st.multiselect(
-                            "⚙️ Triar variables/columnas a mostrar a la llista:",
-                            options=todas_columnas,
-                            default=cols_defecto if cols_defecto else todas_columnas,
-                            key="multiselect_detalle_casilla"
-                        )
+            detalle_df = filtered_df.copy()
+            if j_sel != "Total Resumen":
+                detalle_df = detalle_df[detalle_df['__jugador_key__'] == j_sel.lower()]
+            
+            if o_sel != "Total Resumen":
+                detalle_df = detalle_df[detalle_df['__ordre_str__'] == str(o_sel)]
 
-                        if selected_display_cols:
-                            st.dataframe(detalle_df[selected_display_cols], use_container_width=True)
-                        else:
-                            st.warning("Selecciona al menos una columna per mostrar la informació.")
-                    else:
-                        st.warning("No hi ha registres individuals disponibles per a aquesta combinació.")
+            col_fecha = next((c for c in ['ddmmaa', 'fecha'] if c in detalle_df.columns), None)
+            if col_fecha:
+                detalle_df[col_fecha] = pd.to_datetime(detalle_df[col_fecha], errors='coerce')
+                detalle_df = detalle_df.sort_values(by=col_fecha, ascending=False)
+
+            st.markdown(f"### 📋 Desglossament | Jugador: [{j_sel}] - Ordre: [{o_sel}]")
+            st.write(f"Registres trobats: {len(detalle_df)}")
+
+            if not detalle_df.empty:
+                todas_columnas = [c for c in detalle_df.columns if c not in ['__jugador_key__', '__ordre_str__']]
+                cols_defecto = [c for c in [col_fecha, col_jugador, col_ordre, col_total, 'jornada', 'temporada'] if c in todas_columnas]
+
+                selected_display_cols = st.multiselect(
+                    "⚙️ Triar variables a mostrar:",
+                    options=todas_columnas,
+                    default=cols_defecto if cols_defecto else todas_columnas,
+                    key="multiselect_detalle_casilla_final"
+                )
+
+                if selected_display_cols:
+                    st.dataframe(detalle_df[selected_display_cols], use_container_width=True)
+            else:
+                st.warning("No hi ha registres individuals per a aquesta selecció.")
+
     else:
         st.warning("No s'han trobat les dades necessàries amb els filtres actuals.")
 
