@@ -144,17 +144,19 @@ try:
 
                 detalle_df = filtered_df.copy()
 
-                # 1. Filtrar por Jugador (si no es la fila de resumen global)
+                # 1. Filtrar por Jugador (siempre que no sea la fila resumen global)
                 if row_label != "Total Resumen":
                     detalle_df = detalle_df[detalle_df['__jugador_key__'] == row_label.lower()]
 
-                # 2. Filtrar por Órden (verificando primero que no sea la columna de resumen)
+                # 2. Filtrar por Órden de forma completamente segura (evitando conversión en columnas de resumen)
                 if col_label != "Total Resumen":
                     try:
+                        # Intentamos buscar haciendo match estricto con el tipo de la columna original
                         original_col_type = filtered_df[col_ordre].dtype
                         val_conv = original_col_type.type(col_label)
                         detalle_df = detalle_df[detalle_df[col_ordre] == val_conv]
                     except Exception:
+                        # Respaldo seguro comparando por texto plano
                         detalle_df = detalle_df[detalle_df[col_ordre].astype(str) == str(col_label)]
 
                 # 3. Ordenar por Fecha (ddmmaa o fecha) Descendentemente
