@@ -116,7 +116,6 @@ try:
         event = st.dataframe(
             tabla_final,
             use_container_width=True,
-            on_st_data_editor_change=None,
             on_select="rerun",
             selection_mode="single-cell"
         )
@@ -139,7 +138,6 @@ try:
                 detalle_df = detalle_df[detalle_df[col_jugador] == row_label]
             
             if not is_col_summary:
-                # Intentar convertir la etiqueta de columna al tipo de dato original de 'ordre'
                 try:
                     original_col_type = filtered_df[col_ordre].dtype
                     val_conv = original_col_type.type(col_label)
