@@ -114,7 +114,7 @@ try:
         st.subheader("Tabla Dinámica Interactiva (Jugadores / Órdes)")
         st.info("Haz clic en cualquier celda de la tabla para ver el desglose de registros.")
 
-        # --- TABLA INTERACTIVA CON CAPTURA DE EVENTO SEGURO ---
+        # --- TABLA INTERACTIVA CON CAPTURA DE EVENTO ---
         event = st.dataframe(
             tabla_final,
             use_container_width=True,
@@ -139,25 +139,24 @@ try:
 
         if r_idx is not None and c_idx is not None:
             if 0 <= r_idx < len(tabla_final.index) and 0 <= c_idx < len(tabla_final.columns):
+                # Obtener de forma robusta las etiquetas exactas mediante los índices de la tabla final
                 row_label = str(tabla_final.index[r_idx])
                 col_label = str(tabla_final.columns[c_idx])
 
                 detalle_df = filtered_df.copy()
 
-                # 1. Filtrar por Jugador (siempre que no sea la fila resumen global)
+                # 1. Filtrar por Jugador (si no es la fila de resumen global)
                 if row_label != "Total Resumen":
                     detalle_df = detalle_df[detalle_df['__jugador_key__'] == row_label.lower()]
 
-                # 2. Filtrar por Órden de forma completamente segura (evitando conversión en columnas de resumen)
+                # 2. Filtrar por Órden de forma completamente exacta a partir de la etiqueta de columna seleccionada
                 if col_label != "Total Resumen":
                     try:
-                        # Intentamos buscar haciendo match estricto con el tipo de la columna original
                         original_col_type = filtered_df[col_ordre].dtype
                         val_conv = original_col_type.type(col_label)
                         detalle_df = detalle_df[detalle_df[col_ordre] == val_conv]
                     except Exception:
-                        # Respaldo seguro comparando por texto plano
-                        detalle_df = detalle_df[detalle_df[col_ordre].astype(str) == str(col_label)]
+                        detalle_df = detalle_df[detalle_df[col_ordre].astype(str) == col_label]
 
                 # 3. Ordenar por Fecha (ddmmaa o fecha) Descendentemente
                 col_fecha = next((c for c in ['ddmmaa', 'fecha'] if c in detalle_df.columns), None)
