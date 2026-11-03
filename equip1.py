@@ -60,15 +60,12 @@ try:
         filtered_df[col_total] = pd.to_numeric(filtered_df[col_total], errors='coerce')
 
         # --- CONFECCIÓN DE LA TABLA DINÁMICA ---
-        # 1. Pivotes de media y recuento (Jugadores en filas, Ordre en columnas)
         pivot_mean = filtered_df.pivot_table(index=col_jugador, columns=col_ordre, values=col_total, aggfunc='mean')
         pivot_count = filtered_df.pivot_table(index=col_jugador, columns=col_ordre, values=col_total, aggfunc='count').fillna(0).astype(int)
 
-        # 2. Resumen por jugador (filas)
         resumen_jugador_mean = filtered_df.groupby(col_jugador)[col_total].mean()
         resumen_jugador_count = filtered_df.groupby(col_jugador)[col_total].count()
 
-        # 3. Ordenar jugadores descendentemente por su media resumen
         orden_jugadores = resumen_jugador_mean.sort_values(ascending=False).index
         
         pivot_mean = pivot_mean.reindex(orden_jugadores)
@@ -76,11 +73,9 @@ try:
         resumen_jugador_mean = resumen_jugador_mean.reindex(orden_jugadores)
         resumen_jugador_count = resumen_jugador_count.reindex(orden_jugadores)
 
-        # 4. Resumen por ordre (columnas)
         resumen_ordre_mean = filtered_df.groupby(col_ordre)[col_total].mean()
         resumen_ordre_count = filtered_df.groupby(col_ordre)[col_total].count()
 
-        # Construir DataFrame con formato "media (n)"
         display_data = []
         col_names = list(pivot_mean.columns)
 
@@ -94,7 +89,6 @@ try:
                 else:
                     row_dict[str(col)] = f"{m:.2f} ({int(c)})"
             
-            # Columna resumen por jugador
             tot_m = resumen_jugador_mean[jugador]
             tot_c = resumen_jugador_count[jugador]
             row_dict["Total Resumen"] = f"{tot_m:.2f} ({int(tot_c)})" if not pd.isna(tot_m) else "-"
@@ -102,14 +96,12 @@ try:
 
         display_df = pd.DataFrame(display_data, index=orden_jugadores)
 
-        # Fila resumen general (abajo)
         row_resumen_dict = {}
         for col in col_names:
             m = resumen_ordre_mean[col]
             c = resumen_ordre_count[col]
             row_resumen_dict[str(col)] = f"{m:.2f} ({int(c)})" if not pd.isna(m) else "-"
         
-        # Celda inferior derecha (Total global)
         global_m = filtered_df[col_total].mean()
         global_c = filtered_df[col_total].count()
         row_resumen_dict["Total Resumen"] = f"{global_m:.2f} ({int(global_c)})" if not pd.isna(global_m) else "-"
@@ -118,12 +110,13 @@ try:
         tabla_final = pd.concat([display_df, resumen_fila_df])
 
         st.subheader("Tabla Dinámica Interactiva (Jugadores / Órdes)")
-        st.info("Haz clic en cualquier celda de la tabla para ver el desglose de registros detallado.")
+        st.info("Haz clic en cualquier celda de la tabla (incluyendo las de resumen) para ver el desglose de registros.")
 
         # --- TABLA INTERACTIVA CON CAPTURA DE EVENTO ---
         event = st.dataframe(
             tabla_final,
             use_container_width=True,
+            on_st_data_editor_change=None,
             on_select="rerun",
             selection_mode="single-cell"
         )
@@ -141,12 +134,18 @@ try:
             is_row_summary = (str(row_label) == "Total Resumen")
             is_col_summary = (str(col_label) == "Total Resumen")
 
-            # Filtrar según la celda seleccionada
+            # Filtrar según la celda seleccionada (manejando celdas normales y de resumen)
             if not is_row_summary:
                 detalle_df = detalle_df[detalle_df[col_jugador] == row_label]
             
             if not is_col_summary:
-                detalle_df = detalle_df[detalle_df[col_ordre] == col_label]
+                # Intentar convertir la etiqueta de columna al tipo de dato original de 'ordre'
+                try:
+                    original_col_type = filtered_df[col_ordre].dtype
+                    val_conv = original_col_type.type(col_label)
+                except Exception:
+                    val_conv = col_label
+                detalle_df = detalle_df[detalle_df[col_ordre] == val_conv]
 
             # Ordenar descendentemente por la variable fecha ('ddmmaa' o 'fecha')
             col_fecha = next((c for c in ['ddmmaa', 'fecha'] if c in detalle_df.columns), None)
@@ -160,7 +159,6 @@ try:
             todas_columnas = list(detalle_df.columns)
             cols_defecto = [c for c in [col_fecha, col_jugador, col_ordre, col_total, 'jornada', 'temporada'] if c in todas_columnas]
 
-            # Selector interactivo (multiselect) con icono para escoger variables
             selected_display_cols = st.multiselect(
                 "⚙️ Escoger variables/columnas a mostrar en la lista:",
                 options=todas_columnas,
