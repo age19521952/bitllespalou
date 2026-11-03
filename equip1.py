@@ -56,15 +56,16 @@ try:
     col_total = next((c for c in ['total', 'totalc'] if c in filtered_df.columns), None)
 
     if col_jugador and col_ordre and col_total and not filtered_df.empty:
-        # Asegurar tipo numérico en total
+        # Asegurar tipo numérico en total y estandarizar el nombre del jugador a minúsculas limpias en el DF
         filtered_df[col_total] = pd.to_numeric(filtered_df[col_total], errors='coerce')
+        filtered_df['__jugador_key__'] = filtered_df[col_jugador].astype(str).str.strip().str.lower()
 
         # --- CONFECCIÓN DE LA TABLA DINÁMICA ---
-        pivot_mean = filtered_df.pivot_table(index=col_jugador, columns=col_ordre, values=col_total, aggfunc='mean')
-        pivot_count = filtered_df.pivot_table(index=col_jugador, columns=col_ordre, values=col_total, aggfunc='count').fillna(0).astype(int)
+        pivot_mean = filtered_df.pivot_table(index='__jugador_key__', columns=col_ordre, values=col_total, aggfunc='mean')
+        pivot_count = filtered_df.pivot_table(index='__jugador_key__', columns=col_ordre, values=col_total, aggfunc='count').fillna(0).astype(int)
 
-        resumen_jugador_mean = filtered_df.groupby(col_jugador)[col_total].mean()
-        resumen_jugador_count = filtered_df.groupby(col_jugador)[col_total].count()
+        resumen_jugador_mean = filtered_df.groupby('__jugador_key__')[col_total].mean()
+        resumen_jugador_count = filtered_df.groupby('__jugador_key__')[col_total].count()
 
         orden_jugadores = resumen_jugador_mean.sort_values(ascending=False).index
         
@@ -79,22 +80,24 @@ try:
         display_data = []
         col_names = list(pivot_mean.columns)
 
-        for jugador in orden_jugadores:
+        for jugador_key in orden_jugadores:
             row_dict = {}
             for col in col_names:
-                m = pivot_mean.loc[jugador, col]
-                c = pivot_count.loc[jugador, col]
+                m = pivot_mean.loc[jugador_key, col]
+                c = pivot_count.loc[jugador_key, col]
                 if pd.isna(m) or c == 0:
                     row_dict[str(col)] = "-"
                 else:
                     row_dict[str(col)] = f"{m:.2f} ({int(c)})"
             
-            tot_m = resumen_jugador_mean[jugador]
-            tot_c = resumen_jugador_count[jugador]
+            tot_m = resumen_jugador_mean[jugador_key]
+            tot_c = resumen_jugador_count[jugador_key]
             row_dict["Total Resumen"] = f"{tot_m:.2f} ({int(tot_c)})" if not pd.isna(tot_m) else "-"
             display_data.append(row_dict)
 
-        display_df = pd.DataFrame(display_data, index=orden_jugadores)
+        # Mostrar los nombres en mayúsculas bonitas para la interfaz
+        display_index = [str(j).upper() for j in orden_jugadores]
+        display_df = pd.DataFrame(display_data, index=display_index)
 
         row_resumen_dict = {}
         for col in col_names:
@@ -110,7 +113,7 @@ try:
         tabla_final = pd.concat([display_df, resumen_fila_df])
 
         st.subheader("Tabla Dinámica Interactiva (Jugadores / Órdes)")
-        st.info("Haz clic en cualquier celda de la tabla (incluyendo las de resumen) para ver el desglose de registros.")
+        st.info("Haz clic en cualquier celda de la tabla para ver el desglose de registros.")
 
         # --- TABLA INTERACTIVA CON CAPTURA DE EVENTO ---
         event = st.dataframe(
@@ -120,24 +123,29 @@ try:
             selection_mode="single-cell"
         )
 
-        # --- GESTIÓN DE CLIC EN CASILLA ---
-        if event and event.selection and event.selection.rows and event.selection.columns:
-            r_idx = event.selection.rows[0]
-            c_idx = event.selection.columns[0]
+        # --- DETECCIÓN DE CELDA SELECCIONADA ---
+        r_idx, c_idx = None, None
 
-            row_label = tabla_final.index[r_idx]
-            col_label = tabla_final.columns[c_idx]
+        if event and hasattr(event, "selection") and event.selection:
+            if "cells" in event.selection and len(event.selection["cells"]) > 0:
+                r_idx, c_idx = event.selection["cells"][0]
+            elif "rows" in event.selection and "columns" in event.selection:
+                if len(event.selection["rows"]) > 0 and len(event.selection["columns"]) > 0:
+                    r_idx = event.selection["rows"][0]
+                    c_idx = event.selection["columns"][0]
+
+        if r_idx is not None and c_idx is not None:
+            row_label = str(tabla_final.index[r_idx])
+            col_label = str(tabla_final.columns[c_idx])
 
             detalle_df = filtered_df.copy()
 
-            is_row_summary = (str(row_label) == "Total Resumen")
-            is_col_summary = (str(col_label) == "Total Resumen")
+            # 1. Filtro por Jugador (Totalmente insensible a mayúsculas/minúsculas)
+            if row_label != "Total Resumen":
+                detalle_df = detalle_df[detalle_df['__jugador_key__'] == row_label.lower()]
 
-            # Filtrar según la celda seleccionada (manejando celdas normales y de resumen)
-            if not is_row_summary:
-                detalle_df = detalle_df[detalle_df[col_jugador] == row_label]
-            
-            if not is_col_summary:
+            # 2. Filtro por Órden
+            if col_label != "Total Resumen":
                 try:
                     original_col_type = filtered_df[col_ordre].dtype
                     val_conv = original_col_type.type(col_label)
@@ -145,7 +153,7 @@ try:
                     val_conv = col_label
                 detalle_df = detalle_df[detalle_df[col_ordre] == val_conv]
 
-            # Ordenar descendentemente por la variable fecha ('ddmmaa' o 'fecha')
+            # 3. Ordenar por Fecha (ddmmaa) Descendentemente
             col_fecha = next((c for c in ['ddmmaa', 'fecha'] if c in detalle_df.columns), None)
             if col_fecha:
                 detalle_df[col_fecha] = pd.to_datetime(detalle_df[col_fecha], errors='coerce')
@@ -153,21 +161,26 @@ try:
 
             st.markdown("---")
             st.subheader(f"📋 Desglose de Registros | Jugador: [{row_label}] - Órdes: [{col_label}]")
+            st.caption(f"Registros en esta casilla: {len(detalle_df)}")
 
-            todas_columnas = list(detalle_df.columns)
-            cols_defecto = [c for c in [col_fecha, col_jugador, col_ordre, col_total, 'jornada', 'temporada'] if c in todas_columnas]
+            if not detalle_df.empty:
+                # Ocultar la columna auxiliar interna de la vista de detalle si está presente
+                todas_columnas = [c for c in detalle_df.columns if c != '__jugador_key__']
+                cols_defecto = [c for c in [col_fecha, col_jugador, col_ordre, col_total, 'jornada', 'temporada'] if c in todas_columnas]
 
-            selected_display_cols = st.multiselect(
-                "⚙️ Escoger variables/columnas a mostrar en la lista:",
-                options=todas_columnas,
-                default=cols_defecto if cols_defecto else todas_columnas,
-                key="multiselect_detalle_casilla"
-            )
+                selected_display_cols = st.multiselect(
+                    "⚙️ Escoger variables/columnas a mostrar en la lista:",
+                    options=todas_columnas,
+                    default=cols_defecto if cols_defecto else todas_columnas,
+                    key="multiselect_detalle_casilla"
+                )
 
-            if selected_display_cols:
-                st.dataframe(detalle_df[selected_display_cols], use_container_width=True)
+                if selected_display_cols:
+                    st.dataframe(detalle_df[selected_display_cols], use_container_width=True)
+                else:
+                    st.warning("Selecciona al menos una columna para mostrar la información.")
             else:
-                st.warning("Selecciona al menos una columna para mostrar la información.")
+                st.warning("No hay registros individuales disponibles para esta combinación.")
     else:
         st.warning("No se encontraron los datos necesarios con los filtros actuales.")
 
