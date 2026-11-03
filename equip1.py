@@ -20,10 +20,8 @@ try:
     # --- ZONA DE FILTROS ---
     col1, col2, col3 = st.columns(3)
     
-    # Filtro 1: Equip
     equip_filter = col1.text_input("Filtrar por Equip", value="palou")
 
-    # Filtro 2: Temporada (lista única)
     if 'temporada' in df.columns:
         temporadas_unicas = sorted(df['temporada'].dropna().astype(str).unique())
         selected_temporada = col2.selectbox("Seleccionar Temporada", options=temporadas_unicas)
@@ -31,7 +29,6 @@ try:
         st.error("No se encontró la columna 'temporada' en los datos.")
         selected_temporada = None
 
-    # Aplicar filtros iniciales
     filtered_df = df.copy()
     if equip_filter and 'equip' in filtered_df.columns:
         filtered_df = filtered_df[filtered_df['equip'].astype(str).str.lower().str.contains(equip_filter.lower(), na=False)]
@@ -39,7 +36,6 @@ try:
     if selected_temporada:
         filtered_df = filtered_df[filtered_df['temporada'].astype(str) == selected_temporada]
 
-    # Filtro 3: Jornada (multiselección)
     if 'jornada' in filtered_df.columns:
         jornadas_disponibles = sorted(filtered_df['jornada'].dropna().unique())
         selected_jornadas = col3.multiselect("Seleccionar Jornada(s)", options=jornadas_disponibles, default=jornadas_disponibles)
@@ -50,17 +46,13 @@ try:
 
     st.write(f"**Registros encontrados:** {len(filtered_df)}")
 
-    # Validar presencia de columnas clave
     col_jugador = next((c for c in ['jugador', 'jugadors', 'nom'] if c in filtered_df.columns), None)
     col_ordre = next((c for c in ['ordre', 'orden'] if c in filtered_df.columns), None)
     col_total = next((c for c in ['total', 'totalc'] if c in filtered_df.columns), None)
 
     if col_jugador and col_ordre and col_total and not filtered_df.empty:
-        # Asegurar tipos correctos y limpios
         filtered_df[col_total] = pd.to_numeric(filtered_df[col_total], errors='coerce')
-        # Normalizar ordre a enteros limpios para evitar desajustes con 9, 10, etc.
         filtered_df[col_ordre] = pd.to_numeric(filtered_df[col_ordre], errors='coerce').fillna(0).astype(int)
-        
         filtered_df['__jugador_key__'] = filtered_df[col_jugador].astype(str).str.strip().str.lower()
 
         # --- CONFECCIÓN DE LA TABLA DINÁMICA ---
@@ -81,8 +73,8 @@ try:
         resumen_ordre_count = filtered_df.groupby(col_ordre)[col_total].count()
 
         display_data = []
-        # Ordenar las columnas numéricamente (1, 2, 3, 4, 5, 9, 10...)
-        col_names = sorted(list(pivot_mean.columns), key=lambda x: int(x) if str(x).isdigit() else 0)
+        raw_cols = list(pivot_mean.columns)
+        col_names = sorted(raw_cols, key=lambda x: int(x) if str(x).isdigit() else 0)
 
         for jugador_key in orden_jugadores:
             row_dict = {"Jugador": str(jugador_key).upper()}
@@ -101,7 +93,6 @@ try:
 
         display_df = pd.DataFrame(display_data)
 
-        # Fila resumen general al final
         row_resumen_dict = {"Jugador": "Total Resumen"}
         for col in col_names:
             m = resumen_ordre_mean[col]
@@ -118,16 +109,18 @@ try:
         st.subheader("Tabla Dinámica Interactiva (Jugadores / Órdes)")
         st.info("Haz clic en cualquier celda de la tabla para ver el desglose de registros.")
 
-        # --- TABLA INTERACTIVA ---
+        # --- GESTIÓN DE ESTADO PARA EVITAR BUCLES ---
+        if "selected_cell" not in st.session_state:
+            st.session_state.selected_cell = None
+
         event = st.dataframe(
             tabla_final,
             use_container_width=True,
             hide_index=True,
             on_select="rerun",
-            selection_mode="single-cell"
+            selection_mode="single-cell",
+            key="tabla_dinamica_principal"
         )
-
-        r_idx, c_idx = None, None
 
         if event and hasattr(event, "selection") and event.selection:
             cells = event.selection.get("cells", [])
@@ -135,40 +128,33 @@ try:
                 first_cell = cells[0]
                 if isinstance(first_cell, (list, tuple)) and len(first_cell) >= 2:
                     r_idx, c_idx = int(first_cell[0]), int(first_cell[1])
-            
-            if r_idx is None or c_idx is None:
-                rows = event.selection.get("rows", [])
-                cols = event.selection.get("columns", [])
-                if rows and cols and len(rows) > 0 and len(cols) > 0:
-                    r_idx, c_idx = int(rows[0]), int(cols[0])
+                    if 0 <= r_idx < len(tabla_final) and 0 <= c_idx < len(tabla_final.columns):
+                        st.session_state.selected_cell = (r_idx, c_idx)
 
-        if r_idx is not None and c_idx is not None:
+        # --- MOSTRAR DESGLOSE BASADO EN SESSION STATE ---
+        if st.session_state.selected_cell is not None:
+            r_idx, c_idx = st.session_state.selected_cell
             if 0 <= r_idx < len(tabla_final) and 0 <= c_idx < len(tabla_final.columns):
                 row_label = str(tabla_final.iloc[r_idx]["Jugador"])
                 col_label = str(tabla_final.columns[c_idx])
 
                 if col_label == "Jugador":
-                    st.info("💡 Has seleccionado la casilla de nombre del jugador. Haz clic en una celda de puntuación para ver los datos de esa casilla.")
+                    st.info("💡 Has seleccionado la casilla de nombre del jugador. Haz clic en una celda de puntuación.")
                 else:
                     detalle_df = filtered_df.copy()
 
-                    # 1. Filtrar por Jugador (si no es la fila de resumen general)
                     if row_label != "Total Resumen":
                         detalle_df = detalle_df[detalle_df['__jugador_key__'] == row_label.lower()]
 
-                    # 2. Filtrar por Órden de forma limpia y directa
                     if col_label == "Total Resumen":
-                        # Si es Total Resumen, no filtramos por orden específico
                         pass
                     else:
-                        # Convertimos la etiqueta de columna seleccionada a entero de forma segura
                         try:
                             target_ordre = int(col_label)
                             detalle_df = detalle_df[detalle_df[col_ordre] == target_ordre]
                         except Exception:
                             detalle_df = detalle_df[detalle_df[col_ordre].astype(str) == str(col_label)]
 
-                    # 3. Ordenar por Fecha (ddmmaa) Descendentemente
                     col_fecha = next((c for c in ['ddmmaa', 'fecha'] if c in detalle_df.columns), None)
                     if col_fecha:
                         detalle_df[col_fecha] = pd.to_datetime(detalle_df[col_fecha], errors='coerce')
