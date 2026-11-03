@@ -23,8 +23,8 @@ try:
     equip_filter = col1.text_input("Filtrar per Equip", value="palou")
 
     if 'temporada' in df.columns:
-        temporades_unicas = sorted(df['temporada'].dropna().astype(str).unique())
-        selected_temporada = col2.selectbox("Seleccionar Temporada", options=temporades_unicas)
+        temporadas_unicas = sorted(df['temporada'].dropna().astype(str).unique())
+        selected_temporada = col2.selectbox("Seleccionar Temporada", options=temporadas_unicas)
     else:
         st.error("No s'ha trobat la columna 'temporada' a les dades.")
         selected_temporada = None
@@ -74,13 +74,11 @@ try:
                 jugMap[jug][ord_val]['sum'] += float(val)
                 jugMap[jug][ord_val]['count'] += 1
 
-        # Ordenar ordres numèricament si es pot
         try:
             ordresList = sorted(list(ordresSet), key=lambda x: int(float(x)))
         except Exception:
             ordresList = sorted(list(ordresSet))
 
-        # Calcular mitjanes per jugador i ordenar de major a menor mitjana
         rowAverages = {}
         for jug, jObj in jugMap.items():
             r_sum, r_cnt = 0.0, 0
@@ -95,7 +93,6 @@ try:
 
         jugadorsList = sorted(jugMap.keys(), key=lambda j: rowAverages[j]['avg'], reverse=True)
 
-        # Calcular mitjanes per columna (ordre)
         colAverages = {}
         for ord in ordresList:
             c_sum, c_cnt = 0.0, 0
@@ -112,19 +109,8 @@ try:
         globalSum = filtered_df[col_total].sum()
         mitjanaTotalGlobal = round(globalSum / totalRegistres, 2) if totalRegistres > 0 else 0.0
 
-        # Estat per controlar quin jugador/ordre s'ha seleccionat per veure el detall
-        if "selected_jugador" not in st.session_state:
-            st.session_state.selected_jugador = None
-        if "selected_ordre" not in st.session_state:
-            st.session_state.selected_ordre = None
-
         st.subheader("Taula Dinàmica Interactiva (Jugadores / Órdes)")
-        st.info("Fes clic en qualsevol cel·la de puntuació o al Resum per veure el desglossament exacte.")
 
-        # --- GESTIÓ DE CLICS PER PARÀMETRES GET DE STREAMLIT (ALTERNATIVA SEGURA) ---
-        # Creem botons o enllaços interactius per cada cel·la de la taula per garantir 100% fiabilitat
-        
-        # Dibuixem la taula de manera visual neta amb Streamlit
         table_data = []
         for jug in jugadorsList:
             row_dict = {"Jugador": jug}
@@ -139,7 +125,6 @@ try:
             row_dict["Total Resumen"] = f"{tot['avg']:.2f} ({tot['count']})" if tot['count'] > 0 else "-"
             table_data.append(row_dict)
 
-        # Afegir fila de resum final
         summary_row = {"Jugador": "Total Resumen"}
         for ord in ordresList:
             cRes = colAverages.get(ord)
@@ -152,40 +137,32 @@ try:
 
         final_display_df = pd.DataFrame(table_data)
 
-        # Mostrem la taula i un selector directe inferior per triar exactament quina columna i jugador consultar sense errors
+        # Mostrem la taula neta
         st.dataframe(final_display_df, use_container_width=True, hide_index=True)
 
         st.markdown("---")
         st.markdown("### 🔍 Selector de Desglossament per Casella")
         
-        col_sel1, col_sel2, col_sel3 = st.columns(3)
+        col_sel1, col_sel2 = st.columns(2)
         sel_jugador_opt = col_sel1.selectbox("Selecciona Jugador:", options=["-- Tria un jugador --"] + jugadorsList + ["Total Resumen"])
         sel_ordre_opt = col_sel2.selectbox("Selecciona Ordre / Resum:", options=["Total Resumen"] + [str(o) for o in ordresList])
-        
-        if col_sel3.button("Veure Desglossament", type="primary"):
-            if sel_jugador_opt != "-- Tria un jugador --":
-                st.session_state.selected_jugador = sel_jugador_opt
-                st.session_state.selected_ordre = sel_ordre_opt
 
-        # --- MOSTRAR RESULTATS DEL DETALL ---
-        if st.session_state.selected_jugador and st.session_state.selected_jugador != "-- Tria un jugador --":
-            j_sel = st.session_state.selected_jugador
-            o_sel = st.session_state.selected_ordre
-
+        # --- MOSTRAR RESULTATS DEL DETALL AUTOMÀTICAMENT SENSE BOTÓ ---
+        if sel_jugador_opt and sel_jugador_opt != "-- Tria un jugador --":
             detalle_df = filtered_df.copy()
-            if j_sel != "Total Resumen":
-                detalle_df = detalle_df[detalle_df['__jugador_key__'] == j_sel.lower()]
+            if sel_jugador_opt != "Total Resumen":
+                detalle_df = detalle_df[detalle_df['__jugador_key__'] == sel_jugador_opt.lower()]
             
-            if o_sel != "Total Resumen":
-                detalle_df = detalle_df[detalle_df['__ordre_str__'] == str(o_sel)]
+            if sel_ordre_opt != "Total Resumen":
+                detalle_df = detalle_df[detalle_df['__ordre_str__'] == str(sel_ordre_opt)]
 
             col_fecha = next((c for c in ['ddmmaa', 'fecha'] if c in detalle_df.columns), None)
             if col_fecha:
                 detalle_df[col_fecha] = pd.to_datetime(detalle_df[col_fecha], errors='coerce')
                 detalle_df = detalle_df.sort_values(by=col_fecha, ascending=False)
 
-            st.markdown(f"### 📋 Desglossament | Jugador: [{j_sel}] - Ordre: [{o_sel}]")
-            st.write(f"Registres trobats: {len(detalle_df)}")
+            st.markdown(f"### 📋 Desglossament | Jugador: [{sel_jugador_opt}] - Ordre: [{sel_ordre_opt}]")
+            st.caption(f"Registres trobats: {len(detalle_df)}")
 
             if not detalle_df.empty:
                 todas_columnas = [c for c in detalle_df.columns if c not in ['__jugador_key__', '__ordre_str__']]
@@ -201,7 +178,7 @@ try:
                 if selected_display_cols:
                     st.dataframe(detalle_df[selected_display_cols], use_container_width=True)
             else:
-                st.warning("No hi ha registres individuals per a aquesta selecció.")
+                st.warning("No hi ha registres individuals disponibles per a aquesta combinació.")
 
     else:
         st.warning("No s'han trobat les dades necessàries amb els filtres actuals.")
