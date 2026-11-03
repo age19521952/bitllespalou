@@ -14,19 +14,19 @@ def load_data():
 try:
     df = load_data()
     
-    # Normalizar nombres de columnas a minúsculas
+    # Normalitzar noms de columnes a minúscules
     df.columns = [str(c).strip().lower() for c in df.columns]
 
     # --- ZONA DE FILTROS ---
     col1, col2, col3 = st.columns(3)
     
-    equip_filter = col1.text_input("Filtrar por Equip", value="palou")
+    equip_filter = col1.text_input("Filtrar per Equip", value="palou")
 
     if 'temporada' in df.columns:
-        temporadas_unicas = sorted(df['temporada'].dropna().astype(str).unique())
-        selected_temporada = col2.selectbox("Seleccionar Temporada", options=temporadas_unicas)
+        temporades_unicas = sorted(df['temporada'].dropna().astype(str).unique())
+        selected_temporada = col2.selectbox("Seleccionar Temporada", options=temporades_unicas)
     else:
-        st.error("No se encontró la columna 'temporada' en los datos.")
+        st.error("No s'ha trobat la columna 'temporada' a les dades.")
         selected_temporada = None
 
     filtered_df = df.copy()
@@ -42,9 +42,9 @@ try:
         if selected_jornadas:
             filtered_df = filtered_df[filtered_df['jornada'].isin(selected_jornadas)]
     else:
-        st.error("No se encontró la columna 'jornada' en los datos.")
+        st.error("No s'ha trobat la columna 'jornada' a les dades.")
 
-    st.write(f"**Registros encontrados:** {len(filtered_df)}")
+    st.write(f"**Registres trobats:** {len(filtered_df)}")
 
     col_jugador = next((c for c in ['jugador', 'jugadors', 'nom'] if c in filtered_df.columns), None)
     col_ordre = next((c for c in ['ordre', 'orden'] if c in filtered_df.columns), None)
@@ -52,12 +52,13 @@ try:
 
     if col_jugador and col_ordre and col_total and not filtered_df.empty:
         filtered_df[col_total] = pd.to_numeric(filtered_df[col_total], errors='coerce')
-        filtered_df[col_ordre] = pd.to_numeric(filtered_df[col_ordre], errors='coerce').fillna(0).astype(int)
+        # Mantenim l'ordre com a text/string net per evitar qualsevol conflicte de tipus
+        filtered_df['__ordre_str__'] = filtered_df[col_ordre].astype(str).str.strip()
         filtered_df['__jugador_key__'] = filtered_df[col_jugador].astype(str).str.strip().str.lower()
 
-        # --- CONFECCIÓN DE LA TABLA DINÁMICA ---
-        pivot_mean = filtered_df.pivot_table(index='__jugador_key__', columns=col_ordre, values=col_total, aggfunc='mean')
-        pivot_count = filtered_df.pivot_table(index='__jugador_key__', columns=col_ordre, values=col_total, aggfunc='count').fillna(0).astype(int)
+        # --- CONFECCIÓ DE LA TAULA DINÀMICA ---
+        pivot_mean = filtered_df.pivot_table(index='__jugador_key__', columns='__ordre_str__', values=col_total, aggfunc='mean')
+        pivot_count = filtered_df.pivot_table(index='__jugador_key__', columns='__ordre_str__', values=col_total, aggfunc='count').fillna(0).astype(int)
 
         resumen_jugador_mean = filtered_df.groupby('__jugador_key__')[col_total].mean()
         resumen_jugador_count = filtered_df.groupby('__jugador_key__')[col_total].count()
@@ -69,18 +70,22 @@ try:
         resumen_jugador_mean = resumen_jugador_mean.reindex(orden_jugadores)
         resumen_jugador_count = resumen_jugador_count.reindex(orden_jugadores)
 
-        resumen_ordre_mean = filtered_df.groupby(col_ordre)[col_total].mean()
-        resumen_ordre_count = filtered_df.groupby(col_ordre)[col_total].count()
+        resumen_ordre_mean = filtered_df.groupby('__ordre_str__')[col_total].mean()
+        resumen_ordre_count = filtered_df.groupby('__ordre_str__')[col_total].count()
+
+        # Obtenim les columnes d'ordre ordenades numèricament si es pot, o alfabèticament
+        raw_cols = [str(c) for c in pivot_mean.columns]
+        try:
+            col_names = sorted(raw_cols, key=lambda x: int(float(x)))
+        except Exception:
+            col_names = sorted(raw_cols)
 
         display_data = []
-        raw_cols = list(pivot_mean.columns)
-        col_names = sorted(raw_cols, key=lambda x: int(x) if str(x).isdigit() else 0)
-
         for jugador_key in orden_jugadores:
             row_dict = {"Jugador": str(jugador_key).upper()}
             for col in col_names:
-                m = pivot_mean.loc[jugador_key, col]
-                c = pivot_count.loc[jugador_key, col]
+                m = pivot_mean.loc[jugador_key, col] if col in pivot_mean.columns else np.nan
+                c = pivot_count.loc[jugador_key, col] if col in pivot_count.columns else 0
                 if pd.isna(m) or c == 0:
                     row_dict[str(col)] = "-"
                 else:
@@ -95,8 +100,8 @@ try:
 
         row_resumen_dict = {"Jugador": "Total Resumen"}
         for col in col_names:
-            m = resumen_ordre_mean[col]
-            c = resumen_ordre_count[col]
+            m = resumen_ordre_mean.get(col, np.nan)
+            c = resumen_ordre_count.get(col, 0)
             row_resumen_dict[str(col)] = f"{m:.2f} ({int(c)})" if not pd.isna(m) else "-"
         
         global_m = filtered_df[col_total].mean()
@@ -107,9 +112,9 @@ try:
         tabla_final = pd.concat([display_df, resumen_fila_df], ignore_index=True)
 
         st.subheader("Tabla Dinámica Interactiva (Jugadores / Órdes)")
-        st.info("Haz clic en cualquier celda de la tabla para ver el desglose de registros.")
+        st.info("Fes clic a qualsevol cel·la de la taula per veure el desglossament de registres.")
 
-        # --- GESTIÓN DE ESTADO PARA EVITAR BUCLES ---
+        # --- GESTIÓ D'ESTAT PER EVITAR BUCLES ---
         if "selected_cell" not in st.session_state:
             st.session_state.selected_cell = None
 
@@ -131,7 +136,7 @@ try:
                     if 0 <= r_idx < len(tabla_final) and 0 <= c_idx < len(tabla_final.columns):
                         st.session_state.selected_cell = (r_idx, c_idx)
 
-        # --- MOSTRAR DESGLOSE BASADO EN SESSION STATE ---
+        # --- MOSTRAR DESGLOSE SEGUR SENSE INT() EN "TOTAL RESUMEN" ---
         if st.session_state.selected_cell is not None:
             r_idx, c_idx = st.session_state.selected_cell
             if 0 <= r_idx < len(tabla_final) and 0 <= c_idx < len(tabla_final.columns):
@@ -139,21 +144,18 @@ try:
                 col_label = str(tabla_final.columns[c_idx])
 
                 if col_label == "Jugador":
-                    st.info("💡 Has seleccionado la casilla de nombre del jugador. Haz clic en una celda de puntuación.")
+                    st.info("💡 Has seleccionat la casella de nom del jugador. Fes clic en una cel·la de puntuació.")
                 else:
                     detalle_df = filtered_df.copy()
 
                     if row_label != "Total Resumen":
                         detalle_df = detalle_df[detalle_df['__jugador_key__'] == row_label.lower()]
 
+                    # FILTRATGE BLINDAT: Si és Total Resumen no filtrem per ordre; si és un ordre, comparem directament com a text
                     if col_label == "Total Resumen":
                         pass
                     else:
-                        try:
-                            target_ordre = int(col_label)
-                            detalle_df = detalle_df[detalle_df[col_ordre] == target_ordre]
-                        except Exception:
-                            detalle_df = detalle_df[detalle_df[col_ordre].astype(str) == str(col_label)]
+                        detalle_df = detalle_df[detalle_df['__ordre_str__'] == col_label]
 
                     col_fecha = next((c for c in ['ddmmaa', 'fecha'] if c in detalle_df.columns), None)
                     if col_fecha:
@@ -161,15 +163,15 @@ try:
                         detalle_df = detalle_df.sort_values(by=col_fecha, ascending=False)
 
                     st.markdown("---")
-                    st.subheader(f"📋 Desglose de Registros | Jugador: [{row_label}] - Órdes: [{col_label}]")
-                    st.caption(f"Registros en esta casilla: {len(detalle_df)}")
+                    st.subheader(f"📋 Desglossament de Registres | Jugador: [{row_label}] - Ordre: [{col_label}]")
+                    st.caption(f"Registres en aquesta casella: {len(detalle_df)}")
 
                     if not detalle_df.empty:
-                        todas_columnas = [c for c in detalle_df.columns if c != '__jugador_key__']
+                        todas_columnas = [c for c in detalle_df.columns if c not in ['__jugador_key__', '__ordre_str__']]
                         cols_defecto = [c for c in [col_fecha, col_jugador, col_ordre, col_total, 'jornada', 'temporada'] if c in todas_columnas]
 
                         selected_display_cols = st.multiselect(
-                            "⚙️ Escoger variables/columnas a mostrar en la lista:",
+                            "⚙️ Triar variables/columnas a mostrar a la llista:",
                             options=todas_columnas,
                             default=cols_defecto if cols_defecto else todas_columnas,
                             key="multiselect_detalle_casilla"
@@ -178,11 +180,11 @@ try:
                         if selected_display_cols:
                             st.dataframe(detalle_df[selected_display_cols], use_container_width=True)
                         else:
-                            st.warning("Selecciona al menos una columna para mostrar la información.")
+                            st.warning("Selecciona al menos una columna per mostrar la informació.")
                     else:
-                        st.warning("No hay registros individuales disponibles para esta combinación.")
+                        st.warning("No hi ha registres individuals disponibles per a aquesta combinació.")
     else:
-        st.warning("No se encontraron los datos necesarios con los filtros actuales.")
+        st.warning("No s'han trobat les dades necessàries amb els filtres actuals.")
 
 except Exception as e:
-    st.error(f"Error al cargar o procesar el fichero Excel: {e}")
+    st.error(f"Error al carregar o processar el fitxer Excel: {e}")
