@@ -78,7 +78,8 @@ try:
         resumen_ordre_count = filtered_df.groupby(col_ordre)[col_total].count()
 
         display_data = []
-        col_names = list(pivot_mean.columns)  # Guardamos los valores originales de las columnas de orden
+        # Ordenar las columnas de orden de forma numérica para que 9 y 10 vayan en su sitio correcto
+        col_names = sorted(list(pivot_mean.columns), key=lambda x: (str(type(x)), x))
 
         for jugador_key in orden_jugadores:
             row_dict = {"Jugador": str(jugador_key).upper()}
@@ -152,7 +153,7 @@ try:
                     if row_label != "Total Resumen":
                         detalle_df = detalle_df[detalle_df['__jugador_key__'] == row_label.lower()]
 
-                    # 2. Filtrar por Órden de forma robusta y segura para cualquier columna (1 al 10)
+                    # 2. Filtrar por Órden o por Total Resumen de forma infalible
                     if col_label != "Total Resumen":
                         matched_val = None
                         for orig_c in col_names:
@@ -168,8 +169,9 @@ try:
                                 detalle_df = detalle_df[detalle_df[col_ordre] == num_val]
                             except Exception:
                                 detalle_df = detalle_df[detalle_df[col_ordre].astype(str) == col_label]
+                    # Si col_label == "Total Resumen", no filtramos por orden (mantiene todos los órdenes del jugador o globales)
 
-                    # 3. Ordenar por Fecha (ddmmaa) Descendentemente
+                    # 3. Ordenar por Fecha (ddmmaa o fecha) Descendentemente
                     col_fecha = next((c for c in ['ddmmaa', 'fecha'] if c in detalle_df.columns), None)
                     if col_fecha:
                         detalle_df[col_fecha] = pd.to_datetime(detalle_df[col_fecha], errors='coerce')
