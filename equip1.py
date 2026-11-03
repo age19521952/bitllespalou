@@ -20,9 +20,7 @@ try:
     # --- FORMATRE DE DATA ROBUST (dd/mm/aaaa) ---
     col_fecha_orig = next((c for c in ['ddmmaa', 'fecha', 'data', 'date'] if c in df.columns), None)
     if col_fecha_orig:
-        # Convertir a datetime gestionando errores y formatos de Excel
         parsed_dates = pd.to_datetime(df[col_fecha_orig], errors='coerce')
-        # Formatear a string dd/mm/aaaa, rellenando los valores nulos/NaT con "—"
         df[col_fecha_orig] = parsed_dates.dt.strftime('%d/%m/%Y').fillna('—')
     
     # --- ZONA DE FILTROS ---
@@ -167,13 +165,21 @@ try:
             st.caption(f"Registros trobats: {len(detalle_df)}")
 
             if not detalle_df.empty:
+                # Ordenar las columnas estrictamente como en la foto de referencia
+                desired_order = [col_fecha_orig, 'temporada', 'jornada', 'np', 'partit', col_jugador, col_total, 'totalc', 'punts', col_ordre]
                 todas_columnas = [c for c in detalle_df.columns if c not in ['__jugador_key__', '__ordre_str__']]
-                cols_defecto = [c for c in [col_fecha_orig, col_jugador, col_ordre, col_total, 'jornada', 'temporada'] if c in todas_columnas]
+                
+                # Filtrar solo las que existan realmente en el DataFrame para evitar errores
+                default_cols_ordered = [c for c in desired_order if c and c in todas_columnas]
+                # Añadir cualquier otra columna restante que no estuviera en la lista fija
+                for c in todas_columnas:
+                    if c not in default_cols_ordered:
+                        default_cols_ordered.append(c)
 
                 selected_display_cols = st.multiselect(
                     "⚙️ Triar variables a mostrar:",
-                    options=todas_columnas,
-                    default=cols_defecto if cols_defecto else todas_columnas,
+                    options=default_cols_ordered,
+                    default=default_cols_ordered,
                     key="multiselect_detalle_casilla_final"
                 )
 
