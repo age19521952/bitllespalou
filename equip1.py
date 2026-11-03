@@ -114,7 +114,7 @@ try:
         st.subheader("Tabla Dinámica Interactiva (Jugadores / Órdes)")
         st.info("Haz clic en cualquier celda de la tabla para ver el desglose de registros.")
 
-        # --- TABLA INTERACTIVA CON CAPTURA DE EVENTO ---
+        # --- TABLA INTERACTIVA CON SELECCIÓN SEGURA ---
         event = st.dataframe(
             tabla_final,
             use_container_width=True,
@@ -122,70 +122,79 @@ try:
             selection_mode="single-cell"
         )
 
-        r_idx, c_idx = None, None
+        row_label, col_label = None, None
 
         if event and hasattr(event, "selection") and event.selection:
+            # Método moderno recomendado: extraer directamente por nombre de columna si está disponible
+            selected_columns = event.selection.get("columns", [])
+            selected_rows = event.selection.get("rows", [])
+            
+            # Si nos devuelve nombres de columnas directamente o índices seguros
             cells = event.selection.get("cells", [])
             if cells and len(cells) > 0:
                 first_cell = cells[0]
                 if isinstance(first_cell, (list, tuple)) and len(first_cell) >= 2:
                     r_idx, c_idx = int(first_cell[0]), int(first_cell[1])
-            
-            if r_idx is None or c_idx is None:
-                rows = event.selection.get("rows", [])
-                cols = event.selection.get("columns", [])
-                if rows and cols and len(rows) > 0 and len(cols) > 0:
-                    r_idx, c_idx = int(rows[0]), int(cols[0])
+                    if 0 <= r_idx < len(tabla_final.index) and 0 <= c_idx < len(tabla_final.columns):
+                        row_label = str(tabla_final.index[r_idx])
+                        col_label = str(tabla_final.columns[c_idx])
+            elif selected_rows and selected_columns:
+                # Si tenemos filas y columnas seleccionadas de forma independiente
+                r_idx = int(selected_rows[0])
+                # A veces selected_columns trae nombres de columnas o índices
+                col_item = selected_columns[0]
+                if isinstance(col_item, int):
+                    c_idx = col_item
+                    if 0 <= r_idx < len(tabla_final.index) and 0 <= c_idx < len(tabla_final.columns):
+                        row_label = str(tabla_final.index[r_idx])
+                        col_label = str(tabla_final.columns[c_idx])
+                elif isinstance(col_item, str):
+                    col_label = col_item
+                    if 0 <= r_idx < len(tabla_final.index):
+                        row_label = str(tabla_final.index[r_idx])
 
-        if r_idx is not None and c_idx is not None:
-            # Usar c_idx directamente sin restar 1
-            adjusted_c_idx = c_idx
+        if row_label and col_label:
+            detalle_df = filtered_df.copy()
 
-            if 0 <= r_idx < len(tabla_final.index) and 0 <= adjusted_c_idx < len(tabla_final.columns):
-                row_label = str(tabla_final.index[r_idx])
-                col_label = str(tabla_final.columns[adjusted_c_idx])
+            # 1. Filtrar por Jugador (si no es la fila de resumen global)
+            if row_label != "Total Resumen":
+                detalle_df = detalle_df[detalle_df['__jugador_key__'] == row_label.lower()]
 
-                detalle_df = filtered_df.copy()
+            # 2. Filtrar por Órden de forma robusta para cualquier columna (1 al 10)
+            if col_label != "Total Resumen":
+                try:
+                    num_val = pd.to_numeric(col_label)
+                    detalle_df = detalle_df[(detalle_df[col_ordre] == num_val) | (detalle_df[col_ordre].astype(str) == col_label)]
+                except Exception:
+                    detalle_df = detalle_df[detalle_df[col_ordre].astype(str) == col_label]
 
-                # 1. Filtrar por Jugador (si no es la fila de resumen global)
-                if row_label != "Total Resumen":
-                    detalle_df = detalle_df[detalle_df['__jugador_key__'] == row_label.lower()]
+            # 3. Ordenar por Fecha (ddmmaa o fecha) Descendentemente
+            col_fecha = next((c for c in ['ddmmaa', 'fecha'] if c in detalle_df.columns), None)
+            if col_fecha:
+                detalle_df[col_fecha] = pd.to_datetime(detalle_df[col_fecha], errors='coerce')
+                detalle_df = detalle_df.sort_values(by=col_fecha, ascending=False)
 
-                # 2. Filtrar por Órden de forma robusta
-                if col_label != "Total Resumen":
-                    try:
-                        num_val = pd.to_numeric(col_label)
-                        detalle_df = detalle_df[(detalle_df[col_ordre] == num_val) | (detalle_df[col_ordre].astype(str) == col_label)]
-                    except Exception:
-                        detalle_df = detalle_df[detalle_df[col_ordre].astype(str) == col_label]
+            st.markdown("---")
+            st.subheader(f"📋 Desglose de Registros | Jugador: [{row_label}] - Órdes: [{col_label}]")
+            st.caption(f"Registros en esta casilla: {len(detalle_df)}")
 
-                # 3. Ordenar por Fecha (ddmmaa o fecha) Descendentemente
-                col_fecha = next((c for c in ['ddmmaa', 'fecha'] if c in detalle_df.columns), None)
-                if col_fecha:
-                    detalle_df[col_fecha] = pd.to_datetime(detalle_df[col_fecha], errors='coerce')
-                    detalle_df = detalle_df.sort_values(by=col_fecha, ascending=False)
+            if not detalle_df.empty:
+                todas_columnas = [c for c in detalle_df.columns if c != '__jugador_key__']
+                cols_defecto = [c for c in [col_fecha, col_jugador, col_ordre, col_total, 'jornada', 'temporada'] if c in todas_columnas]
 
-                st.markdown("---")
-                st.subheader(f"📋 Desglose de Registros | Jugador: [{row_label}] - Órdes: [{col_label}]")
-                st.caption(f"Registros en esta casilla: {len(detalle_df)}")
+                selected_display_cols = st.multiselect(
+                    "⚙️ Escoger variables/columnas a mostrar en la lista:",
+                    options=todas_columnas,
+                    default=cols_defecto if cols_defecto else todas_columnas,
+                    key="multiselect_detalle_casilla"
+                )
 
-                if not detalle_df.empty:
-                    todas_columnas = [c for c in detalle_df.columns if c != '__jugador_key__']
-                    cols_defecto = [c for c in [col_fecha, col_jugador, col_ordre, col_total, 'jornada', 'temporada'] if c in todas_columnas]
-
-                    selected_display_cols = st.multiselect(
-                        "⚙️ Escoger variables/columnas a mostrar en la lista:",
-                        options=todas_columnas,
-                        default=cols_defecto if cols_defecto else todas_columnas,
-                        key="multiselect_detalle_casilla"
-                    )
-
-                    if selected_display_cols:
-                        st.dataframe(detalle_df[selected_display_cols], use_container_width=True)
-                    else:
-                        st.warning("Selecciona al menos una columna para mostrar la información.")
+                if selected_display_cols:
+                    st.dataframe(detalle_df[selected_display_cols], use_container_width=True)
                 else:
-                    st.warning("No hay registros individuales disponibles para esta combinación.")
+                    st.warning("Selecciona al menos una columna para mostrar la información.")
+            else:
+                st.warning("No hay registros individuales disponibles para esta combinación.")
     else:
         st.warning("No se encontraron los datos necesarios con los filtros actuales.")
 
