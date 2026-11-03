@@ -7,14 +7,15 @@ st.title("Analizador Bitlles Palou (Total = 90)")
 
 @st.cache_data
 def load_data():
-    # Lee el Excel directamente desde el repositorio de GitHub
     url = "https://raw.githubusercontent.com/age19521952/bitllespalou/main/bitllespalou.xlsx"
     return pd.read_excel(url)
 
 try:
     df = load_data()
     
-    # Filtros en barra lateral o superior
+    # Normalizar nombres de columnas a minúsculas
+    df.columns = [str(c).strip().lower() for c in df.columns]
+
     col1, col2, col3 = st.columns(3)
     with col1:
         equip_filter = st.text_input("Equip (Filtrado)", value="palou")
@@ -23,24 +24,31 @@ try:
     with col3:
         search_jugador = st.text_input("Buscar Jugador", value="")
 
-    # Normalizar columnas para evitar errores de mayúsculas/minúsculas
-    df.columns = [str(c).strip().lower() for c in df.columns]
-
-    # Filtrado básico
     filtered_df = df.copy()
+
+    # Filtrar por equipo
     if equip_filter and 'equip' in filtered_df.columns:
         filtered_df = filtered_df[filtered_df['equip'].astype(str).str.lower() == equip_filter.lower()]
         
-    if total_filter and ('total' in filtered_df.columns or 'totalc' in filtered_df.columns):
-        col_total = 'total' if 'total' in filtered_df.columns else 'totalc'
-        filtered_df = filtered_df[filtered_df[col_total].astype(str) == total_filter]
+    # Filtrar por total
+    if total_filter != '':
+        if 'total' in filtered_df.columns:
+            filtered_df = filtered_df[filtered_df['total'].astype(str) == total_filter]
+        elif 'totalc' in filtered_df.columns:
+            filtered_df = filtered_df[filtered_df['totalc'].astype(str) == total_filter]
 
-    if search_jugador and 'jugadors' in filtered_df.columns:
-        filtered_df = filtered_df[filtered_df['jugadors'].astype(str).str.lower().str.contains(search_jugador.lower())]
+    # Filtrar por jugador (buscando en la columna 'jugador')
+    if search_jugador:
+        jugador_col = None
+        for col in ['jugador', 'jugadors', 'nom']:
+            if col in filtered_df.columns:
+                jugador_col = col
+                break
+        if jugador_col:
+            filtered_df = filtered_df[filtered_df[jugador_col].astype(str).str.lower().str.contains(search_jugador.lower(), na=False)]
 
     st.write(f"Registros encontrados: {len(filtered_df)}")
     
-    # Mostrar tabla dinámica o datos filtrados
     st.dataframe(filtered_df, use_container_width=True)
 
 except Exception as e:
