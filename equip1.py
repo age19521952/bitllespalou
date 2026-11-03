@@ -125,14 +125,12 @@ try:
         r_idx, c_idx = None, None
 
         if event and hasattr(event, "selection") and event.selection:
-            # Extracción segura de coordenadas de celdas
             cells = event.selection.get("cells", [])
             if cells and len(cells) > 0:
                 first_cell = cells[0]
                 if isinstance(first_cell, (list, tuple)) and len(first_cell) >= 2:
                     r_idx, c_idx = int(first_cell[0]), int(first_cell[1])
             
-            # Formato alternativo de filas/columnas en algunas versiones
             if r_idx is None or c_idx is None:
                 rows = event.selection.get("rows", [])
                 cols = event.selection.get("columns", [])
@@ -140,27 +138,27 @@ try:
                     r_idx, c_idx = int(rows[0]), int(cols[0])
 
         if r_idx is not None and c_idx is not None:
-            # Validar que los índices estén dentro del rango de la tabla
             if 0 <= r_idx < len(tabla_final.index) and 0 <= c_idx < len(tabla_final.columns):
                 row_label = str(tabla_final.index[r_idx])
                 col_label = str(tabla_final.columns[c_idx])
 
                 detalle_df = filtered_df.copy()
 
-                # 1. Filtrar por Jugador (Insensible a mayúsculas/minúsculas)
+                # 1. Filtrar por Jugador (ignorando mayúsculas/minúsculas y evitando filas de resumen)
                 if row_label != "Total Resumen":
                     detalle_df = detalle_df[detalle_df['__jugador_key__'] == row_label.lower()]
 
-                # 2. Filtrar por Órden
+                # 2. Filtrar por Órden (gestionando de forma segura si se hace clic en la columna de resumen o en un orden numérico)
                 if col_label != "Total Resumen":
                     try:
                         original_col_type = filtered_df[col_ordre].dtype
                         val_conv = original_col_type.type(col_label)
+                        detalle_df = detalle_df[detalle_df[col_ordre] == val_conv]
                     except Exception:
-                        val_conv = col_label
-                    detalle_df = detalle_df[detalle_df[col_ordre] == val_conv]
+                        # Si no se puede convertir directamente (p. ej. texto especial), se intenta como string o valor exacto
+                        detalle_df = detalle_df[detalle_df[col_ordre].astype(str) == str(col_label)]
 
-                # 3. Ordenar por Fecha (ddmmaa) Descendentemente
+                # 3. Ordenar por Fecha (ddmmaa o fecha) Descendentemente
                 col_fecha = next((c for c in ['ddmmaa', 'fecha'] if c in detalle_df.columns), None)
                 if col_fecha:
                     detalle_df[col_fecha] = pd.to_datetime(detalle_df[col_fecha], errors='coerce')
