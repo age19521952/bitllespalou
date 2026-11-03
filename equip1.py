@@ -78,7 +78,7 @@ try:
         resumen_ordre_count = filtered_df.groupby(col_ordre)[col_total].count()
 
         display_data = []
-        col_names = list(pivot_mean.columns)
+        col_names = list(pivot_mean.columns)  # Guardamos los valores originales de las columnas de orden
 
         for jugador_key in orden_jugadores:
             row_dict = {"Jugador": str(jugador_key).upper()}
@@ -114,7 +114,7 @@ try:
         st.subheader("Tabla Dinámica Interactiva (Jugadores / Órdes)")
         st.info("Haz clic en cualquier celda de la tabla para ver el desglose de registros.")
 
-        # --- TABLA INTERACTIVA OCULTANDO EL ÍNDICE IMPLÍCITO ---
+        # --- TABLA INTERACTIVA ---
         event = st.dataframe(
             tabla_final,
             use_container_width=True,
@@ -140,11 +140,9 @@ try:
 
         if r_idx is not None and c_idx is not None:
             if 0 <= r_idx < len(tabla_final) and 0 <= c_idx < len(tabla_final.columns):
-                # La fila nos da el jugador y la columna nos da el ordre
                 row_label = str(tabla_final.iloc[r_idx]["Jugador"])
                 col_label = str(tabla_final.columns[c_idx])
 
-                # Si se hace clic en la primera columna (columna con los nombres de Jugador)
                 if col_label == "Jugador":
                     st.info("💡 Has seleccionado la casilla de nombre del jugador. Haz clic en una celda de puntuación para ver los datos de esa casilla.")
                 else:
@@ -154,13 +152,22 @@ try:
                     if row_label != "Total Resumen":
                         detalle_df = detalle_df[detalle_df['__jugador_key__'] == row_label.lower()]
 
-                    # 2. Filtrar por Órden (si no es la columna de resumen global)
+                    # 2. Filtrar por Órden de forma robusta y segura para cualquier columna (1 al 10)
                     if col_label != "Total Resumen":
-                        try:
-                            num_val = pd.to_numeric(col_label)
-                            detalle_df = detalle_df[(detalle_df[col_ordre] == num_val) | (detalle_df[col_ordre].astype(str) == col_label)]
-                        except Exception:
-                            detalle_df = detalle_df[detalle_df[col_ordre].astype(str) == col_label]
+                        matched_val = None
+                        for orig_c in col_names:
+                            if str(orig_c) == col_label:
+                                matched_val = orig_c
+                                break
+                        
+                        if matched_val is not None:
+                            detalle_df = detalle_df[detalle_df[col_ordre] == matched_val]
+                        else:
+                            try:
+                                num_val = pd.to_numeric(col_label)
+                                detalle_df = detalle_df[detalle_df[col_ordre] == num_val]
+                            except Exception:
+                                detalle_df = detalle_df[detalle_df[col_ordre].astype(str) == col_label]
 
                     # 3. Ordenar por Fecha (ddmmaa) Descendentemente
                     col_fecha = next((c for c in ['ddmmaa', 'fecha'] if c in detalle_df.columns), None)
