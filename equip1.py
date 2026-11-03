@@ -14,7 +14,7 @@ def load_data():
 try:
     df = load_data()
     
-    # Normalitzar nombres de columnas a minúsculas
+    # Normalizar nombres de columnas a minúsculas
     df.columns = [str(c).strip().lower() for c in df.columns]
 
     # --- ZONA DE FILTROS ---
@@ -56,8 +56,11 @@ try:
     col_total = next((c for c in ['total', 'totalc'] if c in filtered_df.columns), None)
 
     if col_jugador and col_ordre and col_total and not filtered_df.empty:
-        # Asegurar tipo numérico en total y estandarizar clave de jugador
+        # Asegurar tipos correctos y limpios
         filtered_df[col_total] = pd.to_numeric(filtered_df[col_total], errors='coerce')
+        # Normalizar ordre a enteros limpios para evitar desajustes con 9, 10, etc.
+        filtered_df[col_ordre] = pd.to_numeric(filtered_df[col_ordre], errors='coerce').fillna(0).astype(int)
+        
         filtered_df['__jugador_key__'] = filtered_df[col_jugador].astype(str).str.strip().str.lower()
 
         # --- CONFECCIÓN DE LA TABLA DINÁMICA ---
@@ -78,12 +81,8 @@ try:
         resumen_ordre_count = filtered_df.groupby(col_ordre)[col_total].count()
 
         display_data = []
-        # Ordenar las columnas numéricamente de forma segura
-        raw_cols = list(pivot_mean.columns)
-        try:
-            col_names = sorted(raw_cols, key=lambda x: float(x))
-        except Exception:
-            col_names = sorted(raw_cols, key=lambda x: str(x))
+        # Ordenar las columnas numéricamente (1, 2, 3, 4, 5, 9, 10...)
+        col_names = sorted(list(pivot_mean.columns), key=lambda x: int(x) if str(x).isdigit() else 0)
 
         for jugador_key in orden_jugadores:
             row_dict = {"Jugador": str(jugador_key).upper()}
@@ -153,17 +152,21 @@ try:
                 else:
                     detalle_df = filtered_df.copy()
 
-                    # 1. Filtrar por Jugador (si no es la fila de resumen global)
+                    # 1. Filtrar por Jugador (si no es la fila de resumen general)
                     if row_label != "Total Resumen":
                         detalle_df = detalle_df[detalle_df['__jugador_key__'] == row_label.lower()]
 
-                    # 2. Filtrar por Órden o Total Resumen mediante comparación de texto directa y segura
+                    # 2. Filtrar por Órden de forma limpia y directa
                     if col_label == "Total Resumen":
-                        # Si es la columna de resumen, no filtramos por orden (mostramos todos los registros acumulados)
+                        # Si es Total Resumen, no filtramos por orden específico
                         pass
                     else:
-                        # Comparamos directamente convirtiendo la columna de órdenes a texto limpio
-                        detalle_df = detalle_df[detalle_df[col_ordre].astype(str).str.strip() == str(col_label).strip()]
+                        # Convertimos la etiqueta de columna seleccionada a entero de forma segura
+                        try:
+                            target_ordre = int(col_label)
+                            detalle_df = detalle_df[detalle_df[col_ordre] == target_ordre]
+                        except Exception:
+                            detalle_df = detalle_df[detalle_df[col_ordre].astype(str) == str(col_label)]
 
                     # 3. Ordenar por Fecha (ddmmaa) Descendentemente
                     col_fecha = next((c for c in ['ddmmaa', 'fecha'] if c in detalle_df.columns), None)
