@@ -1,38 +1,112 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+from scipy.stats import t
+import io
+from reportlab.lib.pagesizes import letter, landscape
+from reportlab.lib import colors
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 st.set_page_config(page_title="Analizador Bitlles Palou", layout="wide")
 
 st.title("Analizador Bitlles Palou")
+
+# --- ESTILOS CSS PARA CONGELAR INTERFAZ Y RECTIFICAR LA TABLA ---
+st.markdown("""
+    <style>
+    /* Fijar la cabecera (header) superior de Streamlit */
+    header[data-testid="stHeader"] {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        z-index: 999;
+    }
+    
+    /* Congelar y fijar las cabeceras de los dataframes */
+    [data-testid="stDataFrame"] div[role="grid"] {
+        max-height: 450px;
+        overflow-y: auto;
+    }
+    
+    [data-testid="stDataFrame"] div[role="columnheader"] {
+        position: sticky;
+        top: 0;
+        background-color: #1e1e1e !important;
+        z-index: 10;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 @st.cache_data
 def load_data():
     url = "https://raw.githubusercontent.com/age19521952/bitllespalou/main/bitllespalou.xlsx"
     return pd.read_excel(url)
 
+def generar_pdf(df_export, titulo="Tabla Dinámica - Bitlles Palou"):
+    """Genera un archivo PDF landscape compactado con la tabla de resumen."""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, 
+        pagesize=landscape(letter),
+        rightMargin=20, leftMargin=20, topMargin=20, bottomMargin=20
+    )
+    story = []
+    
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=14, leading=16, alignment=1)
+    cell_style = ParagraphStyle('CellStyle', parent=styles['Normal'], fontSize=7, leading=8, alignment=1)
+    header_style = ParagraphStyle('HeaderStyle', parent=styles['Normal'], fontSize=8, leading=9, alignment=1, fontName="Helvetica-Bold", textColor=colors.white)
+
+    story.append(Paragraph(titulo, title_style))
+    story.append(Spacer(1, 10))
+
+    # Preparar datos para la tabla ReportLab
+    data = []
+    headers = ["Jugador"] + list(df_export.columns)
+    data.append([Paragraph(h, header_style) for h in headers])
+
+    for row_name, row in df_export.iterrows():
+        row_data = [Paragraph(str(row_name), cell_style)]
+        for val in row:
+            row_data.append(Paragraph(str(val), cell_style))
+        data.append(row_data)
+
+    t = Table(data, repeatRows=1)
+    t.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1f77b4')),
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+        ('ROWBACKGROUNDS', (0,1), (-1,-2), [colors.white, colors.HexColor('#f2f2f2')]),
+        ('BACKGROUND', (0,-1), (-1,-1), colors.HexColor('#e6ecf2')),
+        ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
+    ]))
+    
+    story.append(t)
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
+
 try:
     df = load_data()
-    
-    # Normalitzar noms de columnes a minúscules
     df.columns = [str(c).strip().lower() for c in df.columns]
 
-    # --- FORMATRE DE DATA ROBUST (dd/mm/aaaa) ---
-    col_fecha_orig = next((c for c in ['ddmmaa', 'fecha', 'data', 'date'] if c in df.columns), None)
-    if col_fecha_orig:
-        parsed_dates = pd.to_datetime(df[col_fecha_orig], errors='coerce')
-        df[col_fecha_orig] = parsed_dates.dt.strftime('%d/%m/%Y').fillna('—')
-    
+    # --- NORMALIZAR NOMBRES DE JUGADORES ---
+    col_jugador_raw = next((c for c in ['jugador', 'jugadors', 'nom'] if c in df.columns), None)
+    if col_jugador_raw:
+        df[col_jugador_raw] = df[col_jugador_raw].astype(str).str.strip().str.title()
+
     # --- ZONA DE FILTROS ---
     col1, col2, col3 = st.columns(3)
-    
-    equip_filter = col1.text_input("Filtrar per Equip", value="palou")
+    equip_filter = col1.text_input("Filtrar por Equip", value="palou")
 
     if 'temporada' in df.columns:
         temporadas_unicas = sorted(df['temporada'].dropna().astype(str).unique())
         selected_temporada = col2.selectbox("Seleccionar Temporada", options=temporadas_unicas)
     else:
-        st.error("No s'ha trobat la columna 'temporada' a les dades.")
+        st.error("No se encontró la columna 'temporada' en los datos.")
         selected_temporada = None
 
     filtered_df = df.copy()
@@ -48,143 +122,143 @@ try:
         if selected_jornadas:
             filtered_df = filtered_df[filtered_df['jornada'].isin(selected_jornadas)]
     else:
-        st.error("No s'ha trobat la columna 'jornada' a les dades.")
+        st.error("No se encontró la columna 'jornada' en los datos.")
 
-    st.write(f"**Registres trobats:** {len(filtered_df)}")
+    st.write(f"**Registros encontrados:** {len(filtered_df)}")
 
     col_jugador = next((c for c in ['jugador', 'jugadors', 'nom'] if c in filtered_df.columns), None)
     col_ordre = next((c for c in ['ordre', 'orden'] if c in filtered_df.columns), None)
     col_total = next((c for c in ['total', 'totalc'] if c in filtered_df.columns), None)
 
     if col_jugador and col_ordre and col_total and not filtered_df.empty:
-        filtered_df[col_total] = pd.to_numeric(filtered_df[col_total], errors='coerce')
-        filtered_df['__ordre_str__'] = filtered_df[col_ordre].astype(str).str.strip()
-        filtered_df['__jugador_key__'] = filtered_df[col_jugador].astype(str).str.strip().str.lower()
+        filtered_df[col_ordre] = pd.to_numeric(filtered_df[col_ordre], errors='coerce')
 
-        # --- CONFECCIÓ DE LA MATRIU ---
-        jugMap = {}
-        ordresSet = set()
+        # --- TABLA DINÁMICA ---
+        pivot_mean = filtered_df.pivot_table(index=col_jugador, columns=col_ordre, values=col_total, aggfunc='mean', fill_value=0)
+        pivot_count = filtered_df.pivot_table(index=col_jugador, columns=col_ordre, values=col_total, aggfunc='count', fill_value=0)
 
-        for _, row in filtered_df.iterrows():
-            jug = str(row[col_jugador]).strip().upper()
-            ord_val = row['__ordre_str__']
-            ordresSet.add(ord_val)
+        orden_cols = sorted([c for c in pivot_mean.columns if pd.notna(c)], key=lambda x: int(x))
+        pivot_mean = pivot_mean[orden_cols]
+        pivot_count = pivot_count[orden_cols]
+
+        display_df = pd.DataFrame(index=pivot_mean.index, columns=[str(int(c)) for c in pivot_mean.columns])
+        
+        for r in pivot_mean.index:
+            for c in pivot_mean.columns:
+                m_val = pivot_mean.loc[r, c]
+                c_val = int(pivot_count.loc[r, c])
+                display_df.loc[r, str(int(c))] = f"{m_val:.2f} ({c_val})" if c_val > 0 else "0.00 (0)"
+
+        # --- CÁLCULO DE RESUMEN Y IC 95% INFERIOR (CON T DE STUDENT) ---
+        resumen_jugador_mean = filtered_df.groupby(col_jugador)[col_total].mean()
+        resumen_jugador_count = filtered_df.groupby(col_jugador)[col_total].count()
+        resumen_jugador_std = filtered_df.groupby(col_jugador)[col_total].std(ddof=1).fillna(0)
+
+        ic_lower_list = []
+        for r in display_df.index:
+            m = resumen_jugador_mean.get(r, 0)
+            n = resumen_jugador_count.get(r, 0)
+            s = resumen_jugador_std.get(r, 0)
             
-            if jug not in jugMap:
-                jugMap[jug] = {}
-            if ord_val not in jugMap[jug]:
-                jugMap[jug][ord_val] = {'sum': 0.0, 'count': 0}
-            
-            val = row[col_total]
-            if not pd.isna(val):
-                jugMap[jug][ord_val]['sum'] += float(val)
-                jugMap[jug][ord_val]['count'] += 1
-
-        try:
-            ordresList = sorted(list(ordresSet), key=lambda x: int(float(x)))
-        except Exception:
-            ordresList = sorted(list(ordresSet))
-
-        rowAverages = {}
-        for jug, jObj in jugMap.items():
-            r_sum, r_cnt = 0.0, 0
-            for ord in ordresList:
-                if ord in jObj:
-                    r_sum += jObj[ord]['sum']
-                    r_cnt += jObj[ord]['count']
-            if r_cnt > 0:
-                rowAverages[jug] = {'avg': r_sum / r_cnt, 'count': r_cnt}
+            if n > 1:
+                t_crit = t.ppf(0.975, df=n-1)
+                ic_inf = m - (t_crit * (s / np.sqrt(n)))
             else:
-                rowAverages[jug] = {'avg': 0.0, 'count': 0}
+                ic_inf = m
+                
+            ic_lower_list.append(max(0, ic_inf))
 
-        jugadorsList = sorted(jugMap.keys(), key=lambda j: rowAverages[j]['avg'], reverse=True)
+        display_df['Total Resumen'] = [
+            f"{resumen_jugador_mean.loc[r]:.2f} ({int(resumen_jugador_count.loc[r])})" if r in resumen_jugador_mean else "0.00 (0)"
+            for r in display_df.index
+        ]
+        
+        display_df['IC 95% Inf'] = [f"{v:.2f}" for v in ic_lower_list]
 
-        colAverages = {}
-        for ord in ordresList:
-            c_sum, c_cnt = 0.0, 0
-            for jug in jugadorsList:
-                if ord in jugMap[jug]:
-                    c_sum += jugMap[jug][ord]['sum']
-                    c_cnt += jugMap[jug][ord]['count']
-            if c_cnt > 0:
-                colAverages[ord] = {'avg': round(c_sum / c_cnt, 2), 'count': c_cnt}
-            else:
-                colAverages[ord] = None
+        if not resumen_jugador_mean.empty:
+            sorted_jugadores = resumen_jugador_mean.sort_values(ascending=False).index
+            display_df = display_df.reindex([j for j in sorted_jugadores if j in display_df.index])
 
-        totalRegistres = len(filtered_df)
-        globalSum = filtered_df[col_total].sum()
-        mitjanaTotalGlobal = round(globalSum / totalRegistres, 2) if totalRegistres > 0 else 0.0
+        # --- RESUMEN VERTICAL (Por Orden) ---
+        resumen_orden_mean = filtered_df.groupby(col_ordre)[col_total].mean()
+        resumen_orden_count = filtered_df.groupby(col_ordre)[col_total].count()
+        
+        fila_resumen_vals = {}
+        for c in pivot_mean.columns:
+            fila_resumen_vals[str(int(c))] = f"{resumen_orden_mean.loc[c]:.2f} ({int(resumen_orden_count.loc[c])})" if c in resumen_orden_mean else "0.00 (0)"
+        
+        total_general_mean = filtered_df[col_total].mean()
+        total_general_count = filtered_df[col_total].count()
+        total_general_std = filtered_df[col_total].std(ddof=1)
+        
+        if total_general_count > 1:
+            t_crit_tot = t.ppf(0.975, df=total_general_count-1)
+            total_ic_inf = total_general_mean - (t_crit_tot * (total_general_std / np.sqrt(total_general_count)))
+        else:
+            total_ic_inf = total_general_mean
 
-        st.subheader("Taula Dinàmica Interactiva (Jugadores / Órdes)")
+        fila_resumen_vals['Total Resumen'] = f"{total_general_mean:.2f} ({int(total_general_count)})" if total_general_count > 0 else "0.00 (0)"
+        fila_resumen_vals['IC 95% Inf'] = f"{max(0, total_ic_inf):.2f}" if total_general_count > 0 else "0.00"
 
-        table_data = []
-        for jug in jugadorsList:
-            row_dict = {"Jugador": jug}
-            for ord in ordresList:
-                cell = jugMap[jug].get(ord)
-                if cell and cell['count'] > 0:
-                    row_dict[str(ord)] = f"{(cell['sum']/cell['count']):.2f} ({cell['count']})"
-                else:
-                    row_dict[str(ord)] = "-"
-            
-            tot = rowAverages[jug]
-            row_dict["Total Resumen"] = f"{tot['avg']:.2f} ({tot['count']})" if tot['count'] > 0 else "-"
-            table_data.append(row_dict)
+        fila_resumen_df = pd.DataFrame([fila_resumen_vals], index=['Total Resumen'])
+        display_completo = pd.concat([display_df, fila_resumen_df])
 
-        summary_row = {"Jugador": "Total Resumen"}
-        for ord in ordresList:
-            cRes = colAverages.get(ord)
-            if cRes:
-                summary_row[str(ord)] = f"{cRes['avg']:.2f} ({cRes['count']})"
-            else:
-                summary_row[str(ord)] = "-"
-        summary_row["Total Resumen"] = f"{mitjanaTotalGlobal:.2f} ({totalRegistres})"
-        table_data.append(summary_row)
+        # --- CABECERA SECCIÓN Y DESCARGA PDF ---
+        c_title, c_pdf = st.columns([3, 1])
+        c_title.subheader("Tabla Dinámica Compacta (Jugador vs Órdenes)")
+        
+        pdf_bytes = generar_pdf(display_completo)
+        c_pdf.download_button(
+            label="📄 Descargar Tabla en PDF",
+            data=pdf_bytes,
+            file_name="tabla_dinamica_bitlles_palou.pdf",
+            mime="application/pdf"
+        )
 
-        final_display_df = pd.DataFrame(table_data)
-
-        st.dataframe(final_display_df, use_container_width=True, hide_index=True)
+        st.dataframe(display_completo, use_container_width=True)
 
         st.markdown("---")
-        st.markdown("### 🔍 Selector de Desglossament per Casella")
-        
+        st.subheader("🔍 Desglose detallado por Jugador y Orden")
+
         col_sel1, col_sel2 = st.columns(2)
-        sel_jugador_opt = col_sel1.selectbox("Selecciona Jugador:", options=["-- Tria un jugador --"] + jugadorsList + ["Total Resumen"])
-        sel_ordre_opt = col_sel2.selectbox("Selecciona Ordre / Resum:", options=["Total Resumen"] + [str(o) for o in ordresList])
+        lista_jugadores = ["Todos"] + list(display_df.index)
+        lista_ordens = ["Todos"] + [str(int(c)) for c in orden_cols]
 
-        # --- MOSTRAR RESULTATS DEL DETALL ---
-        if sel_jugador_opt and sel_jugador_opt != "-- Tria un jugador --":
-            detalle_df = filtered_df.copy()
-            if sel_jugador_opt != "Total Resumen":
-                detalle_df = detalle_df[detalle_df['__jugador_key__'] == sel_jugador_opt.lower()]
-            
-            if sel_ordre_opt != "Total Resumen":
-                detalle_df = detalle_df[detalle_df['__ordre_str__'] == str(sel_ordre_opt)]
+        sel_jugador_filtro = col_sel1.selectbox("Seleccionar Jugador para desglose:", options=lista_jugadores)
+        sel_orden_filtro = col_sel2.selectbox("Seleccionar Orden para desglose:", options=lista_ordens)
 
-            st.markdown(f"### 📋 Desglossament | Jugador: [{sel_jugador_opt}] - Ordre: [{sel_ordre_opt}]")
-            st.caption(f"Registros trobats: {len(detalle_df)}")
+        detalle_df = filtered_df.copy()
 
-            if not detalle_df.empty:
-                # Definimos estrictamente solo las columnas que queremos mostrar en ese orden exacto
-                desired_order = [col_fecha_orig, 'temporada', 'jornada', 'np', 'partit', col_jugador, col_total, 'totalc', 'punts', col_ordre]
-                
-                # Nos aseguramos de coger únicamente las que existan realmente en el DataFrame y descartar el resto (t1, t2, t3...)
-                final_cols_to_show = [c for c in desired_order if c and c in detalle_df.columns]
+        if sel_jugador_filtro != "Todos":
+            detalle_df = detalle_df[detalle_df[col_jugador] == sel_jugador_filtro]
+        
+        if sel_orden_filtro != "Todos":
+            detalle_df = detalle_df[detalle_df[col_ordre] == int(sel_orden_filtro)]
 
-                selected_display_cols = st.multiselect(
-                    "⚙️ Triar variables a mostrar:",
-                    options=final_cols_to_show,
-                    default=final_cols_to_show,
-                    key="multiselect_detalle_casilla_final"
-                )
+        col_fecha = next((c for c in ['ddmmaa', 'fecha'] if c in detalle_df.columns), None)
+        if col_fecha:
+            detalle_df['temp_dt'] = pd.to_datetime(detalle_df[col_fecha], format='%d/%m/%Y', errors='coerce')
+            mask_nat = detalle_df['temp_dt'].isna() & detalle_df[col_fecha].notna()
+            if mask_nat.any():
+                detalle_df.loc[mask_nat, 'temp_dt'] = pd.to_datetime(detalle_df.loc[mask_nat, col_fecha], errors='coerce')
 
-                if selected_display_cols:
-                    st.dataframe(detalle_df[selected_display_cols], use_container_width=True)
-            else:
-                st.warning("No hi ha registres individuals disponibles per a aquesta combinació.")
+            detalle_df = detalle_df.sort_values(by='temp_dt', ascending=False, na_position='last')
+            detalle_df[col_fecha] = detalle_df['temp_dt'].dt.strftime('%d/%m/%Y').fillna('Sin Fecha')
+            detalle_df = detalle_df.drop(columns=['temp_dt'])
 
+        st.write(f"**Registros en el desglose:** {len(detalle_df)}")
+
+        columnas_deseadas = ['ddmmaa', 'temporada', 'jornada', 'np', 'partit', 'jugador', 'total', 'totalc', 'punts', 'ordre']
+        cols_a_mostrar = [c for c in columnas_deseadas if c in detalle_df.columns]
+
+        if cols_a_mostrar:
+            num_filas = len(detalle_df)
+            altura_tabla = min(max(100, (num_filas + 1) * 35 + 10), 800) if num_filas > 0 else 100
+            st.dataframe(detalle_df[cols_a_mostrar], use_container_width=True, height=altura_tabla)
+        else:
+            st.warning("No se encontraron las columnas especificadas para mostrar el desglose.")
     else:
-        st.warning("No s'han trobat les dades necessàries amb els filtres actuals.")
+        st.warning("No se encontraron los datos necesarios para generar la tabla dinámica con los filtros actuales.")
 
 except Exception as e:
-    st.error(f"Error al carregar o processar el fitxer Excel: {e}")
+    st.error(f"Error al cargar o procesar el fichero Excel: {e}")
