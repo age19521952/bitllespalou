@@ -42,8 +42,13 @@ st.markdown("""
 def carregar_dades():
     excel_filename = "bitllespalou.xlsx"
     xls = pd.ExcelFile(excel_filename)
-    df_list = [pd.read_excel(xls, sheet_name=sheet) for sheet in xls.sheet_names]
-    df_all = pd.concat(df_list, ignore_index=True)
+    
+    # Llegir només la pestanya principal 'resultats' per evitar duplicitats de pestanyes de partit
+    if "resultats" in xls.sheet_names:
+        df_all = pd.read_excel(xls, sheet_name="resultats")
+    else:
+        df_list = [pd.read_excel(xls, sheet_name=sheet) for sheet in xls.sheet_names]
+        df_all = pd.concat(df_list, ignore_index=True).drop_duplicates()
     
     palou_df = df_all[df_all['equip'].astype(str).str.strip().str.upper() == 'PALOU'].copy()
     palou_df['total'] = pd.to_numeric(palou_df['total'], errors='coerce')
