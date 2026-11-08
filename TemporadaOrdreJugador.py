@@ -51,11 +51,15 @@ def carregar_dades():
     palou_df['ordre'] = pd.to_numeric(palou_df['ordre'], errors='coerce')
     palou_df['np'] = pd.to_numeric(palou_df['np'], errors='coerce').fillna(1).astype(int)
     
+    if 'jornada' in palou_df.columns:
+        palou_df['jornada'] = pd.to_numeric(palou_df['jornada'], errors='coerce')
+    
     # Normalització estricta de majúscules/minúscules per evitar duplicitats de noms
     palou_df['jugador'] = palou_df['jugador'].astype(str).str.strip().str.title()
     
     if 'ddmmaa' in palou_df.columns:
-        palou_df['ddmmaa'] = pd.to_datetime(palou_df['ddmmaa'], errors='coerce')
+        # Dayfirst=True assegura que 08/11/2026 s'interpreti com a 8 de novembre i no 11 d'agost
+        palou_df['ddmmaa'] = pd.to_datetime(palou_df['ddmmaa'], dayfirst=True, errors='coerce')
         
     return palou_df
 
@@ -178,16 +182,31 @@ if current_t1:
             df_grafica = df_filtrat_t2[df_filtrat_t2['ordre'].isin(ordres_floats)].copy()
             
             if not df_grafica.empty:
-                sort_cols = ['ddmmaa', 'np'] if 'ddmmaa' in df_grafica.columns and not df_grafica['ddmmaa'].isna().all() else ['jornada', 'np']
-                df_grafica = df_grafica.sort_values(by=sort_cols, ascending=[True, True])
+                # Gestió unificada de l'ordenació per evitar duplicats o etiquetes NaN
+                if 'jornada' in df_grafica.columns and not df_grafica['jornada'].isna().all():
+                    df_grafica = df_grafica.sort_values(by=['jornada', 'np'], ascending=[True, True])
+                elif 'ddmmaa' in df_grafica.columns:
+                    df_grafica = df_grafica.sort_values(by=['ddmmaa', 'np'], ascending=[True, True], na_position='last')
+                
+                df_grafica = df_grafica.reset_index(drop=True)
                 
                 # Calcular la mitjana acumulada
                 df_grafica['mitjana_acumulada'] = df_grafica['total'].expanding().mean().round(1)
                 
-                if 'ddmmaa' in df_grafica.columns and not df_grafica['ddmmaa'].isna().all():
-                    eix_x_labels = df_grafica['ddmmaa'].dt.strftime('%d/%m/%Y') + ' [O:' + df_grafica['ordre'].astype(int).astype(str) + ' P' + df_grafica['np'].astype(str) + ']'
-                else:
-                    eix_x_labels = 'Jor. ' + df_grafica['jornada'].astype(str) + ' [O:' + df_grafica['ordre'].astype(int).astype(str) + ' P' + df_grafica['np'].astype(str) + ']'
+                # Generació de les etiquetes de l'eix X (si ddmmaa és vàlid mostra data, si no mostra Jornada)
+                eix_x_labels = []
+                for idx, row in df_grafica.iterrows():
+                    o_val = int(row['ordre']) if not pd.isna(row['ordre']) else '?'
+                    np_val = int(row['np']) if not pd.isna(row['np']) else '?'
+                    
+                    if 'ddmmaa' in row and pd.notna(row['ddmmaa']):
+                        date_str = row['ddmmaa'].strftime('%d/%m/%Y')
+                        label = f"{date_str} [O:{o_val} P{np_val}]"
+                    elif 'jornada' in row and pd.notna(row['jornada']):
+                        label = f"Jor. {int(row['jornada'])} [O:{o_val} P{np_val}]"
+                    else:
+                        label = f"[O:{o_val} P{np_val}]"
+                    eix_x_labels.append(label)
                     
                 eix_y_vals = df_grafica['total'].values
                 mitjana_acum_vals = df_grafica['mitjana_acumulada'].values
@@ -249,7 +268,7 @@ if current_t1:
                         )
                 
                 # Ampliar el marge superior del gràfic automàticament per encabir totes les etiquetes sense talls
-                max_val = max(max(eix_y_vals), max(mitjana_acum_vals))
+                max_val = max(max(eix_y_vals), max(mitjana_acum_vals)) if len(eix_y_vals) > 0 else 100
                 ax.set_ylim(0, max_val * 1.25)
                         
                 ax.set_xticks(x_pos)
