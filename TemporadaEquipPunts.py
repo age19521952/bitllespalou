@@ -26,7 +26,7 @@ def carregar_dades():
         df_all['jornada'] = pd.to_numeric(df_all['jornada'], errors='coerce')
     
     if 'ddmmaa' in df_all.columns:
-        df_all['ddmmaa'] = pd.to_datetime(df_all['ddmmaa'], errors='coerce')
+        df_all['ddmmaa'] = pd.to_datetime(df_all['ddmmaa'], dayfirst=True, errors='coerce')
         
     return df_all
 
@@ -93,8 +93,13 @@ else:
     df_suma = pd.merge(df_suma_palou, df_suma_rival, on=group_cols, how='left')
     df_suma['total_rival'] = df_suma['total_rival'].fillna(0)
 
-    # Ordenació cronològica estricta ascendent
-    df_suma = df_suma.sort_values(by=group_cols, ascending=[True, True]).reset_index(drop=True)
+    # --- CORRECCIÓ DE L'ORDRE CRONOLÒGIC ESTRICTE ---
+    if 'ddmmaa' in df_suma.columns and not df_suma['ddmmaa'].isna().all():
+        df_suma = df_suma.sort_values(by=['ddmmaa', 'np'], ascending=[True, True]).reset_index(drop=True)
+    elif 'jornada' in df_suma.columns:
+        df_suma = df_suma.sort_values(by=['jornada', 'np'], ascending=[True, True]).reset_index(drop=True)
+    else:
+        df_suma = df_suma.sort_values(by=group_cols, ascending=[True, True]).reset_index(drop=True)
 
     # --- CÀLCULS DE PUNTS ACUMULATS, % I MITJANA ACUMULADA ---
     df_suma['acumulat_punts'] = df_suma['punts'].cumsum()
