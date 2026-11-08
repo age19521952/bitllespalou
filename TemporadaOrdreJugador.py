@@ -58,8 +58,10 @@ def carregar_dades():
     palou_df['jugador'] = palou_df['jugador'].astype(str).str.strip().str.title()
     
     if 'ddmmaa' in palou_df.columns:
-        # Dayfirst=True assegura que 08/11/2026 s'interpreti com a 8 de novembre i no 11 d'agost
         palou_df['ddmmaa'] = pd.to_datetime(palou_df['ddmmaa'], dayfirst=True, errors='coerce')
+        # Propagar automàticament la data dins de la mateixa temporada i jornada si alguna fila estigués buida
+        if 'jornada' in palou_df.columns:
+            palou_df['ddmmaa'] = palou_df.groupby(['temporada', 'jornada'])['ddmmaa'].transform(lambda x: x.ffill().bfill())
         
     return palou_df
 
@@ -182,18 +184,18 @@ if current_t1:
             df_grafica = df_filtrat_t2[df_filtrat_t2['ordre'].isin(ordres_floats)].copy()
             
             if not df_grafica.empty:
-                # Gestió unificada de l'ordenació per evitar duplicats o etiquetes NaN
-                if 'jornada' in df_grafica.columns and not df_grafica['jornada'].isna().all():
+                # Ordenació cronològica estricta per data i partida
+                if 'ddmmaa' in df_grafica.columns and not df_grafica['ddmmaa'].isna().all():
+                    df_grafica = df_grafica.sort_values(by=['ddmmaa', 'np'], ascending=[True, True])
+                elif 'jornada' in df_grafica.columns:
                     df_grafica = df_grafica.sort_values(by=['jornada', 'np'], ascending=[True, True])
-                elif 'ddmmaa' in df_grafica.columns:
-                    df_grafica = df_grafica.sort_values(by=['ddmmaa', 'np'], ascending=[True, True], na_position='last')
                 
                 df_grafica = df_grafica.reset_index(drop=True)
                 
                 # Calcular la mitjana acumulada
                 df_grafica['mitjana_acumulada'] = df_grafica['total'].expanding().mean().round(1)
                 
-                # Generació de les etiquetes de l'eix X (si ddmmaa és vàlid mostra data, si no mostra Jornada)
+                # Generació de les etiquetes de l'eix X exclusivament amb la data formatada
                 eix_x_labels = []
                 for idx, row in df_grafica.iterrows():
                     o_val = int(row['ordre']) if not pd.isna(row['ordre']) else '?'
@@ -260,7 +262,7 @@ if current_t1:
                         ax.annotate(
                             f'{val:.1f}',
                             xy=(x_pos[idx], val),
-                            xytext=(0, 18),  # Desplaçament vertical major per evitar xocar amb la barra
+                            xytext=(0, 18),
                             textcoords="offset points",
                             ha='center', va='bottom',
                             fontsize=9, fontweight='bold', color='#34d399',
