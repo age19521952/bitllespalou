@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 from scipy.stats import t
 import io
+import re
 from reportlab.lib.pagesizes import letter, landscape
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
@@ -44,28 +45,35 @@ def load_data():
     url = "https://raw.githubusercontent.com/age19521952/bitllespalou/main/bitllespalou.xlsx"
     return pd.read_excel(url)
 
+def extraer_media(val_str):
+    """Extrae el valor numérico de la media contenido en cadenas tipo '12.34 (5)'."""
+    if not isinstance(val_str, str):
+        return float(val_str) if pd.notna(val_str) else 0.0
+    match = re.match(r"^([0-9]+\.?[0-9]*)", val_str.strip())
+    if match:
+        return float(match.group(1))
+    return 0.0
+
 def generar_pdf(df_export, titulo="Tabla Dinámica - Bitlles Palou"):
-    """Genera un archivo PDF landscape compactado con la tabla de resumen."""
+    """Genera un archivo PDF landscape compactado ajustando el ancho de columnas y padding."""
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer, 
         pagesize=landscape(letter),
-        rightMargin=20, leftMargin=20, topMargin=20, bottomMargin=20
+        rightMargin=15, leftMargin=15, topMargin=15, bottomMargin=15
     )
     story = []
     
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=14, leading=16, alignment=1)
-    cell_style = ParagraphStyle('CellStyle', parent=styles['Normal'], fontSize=7, leading=8, alignment=1)
-    header_style = ParagraphStyle('HeaderStyle', parent=styles['Normal'], fontSize=8, leading=9, alignment=1, fontName="Helvetica-Bold", textColor=colors.white)
+    title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=12, leading=14, alignment=1)
+    cell_style = ParagraphStyle('CellStyle', parent=styles['Normal'], fontSize=6.5, leading=7.5, alignment=1)
+    header_style = ParagraphStyle('HeaderStyle', parent=styles['Normal'], fontSize=7.5, leading=8.5, alignment=1, fontName="Helvetica-Bold", textColor=colors.white)
 
     story.append(Paragraph(titulo, title_style))
-    story.append(Spacer(1, 10))
+    story.append(Spacer(1, 8))
 
-    # Preparar datos para la tabla ReportLab
-    data = []
     headers = ["Jugador"] + list(df_export.columns)
-    data.append([Paragraph(h, header_style) for h in headers])
+    data = [[Paragraph(h, header_style) for h in headers]]
 
     for row_name, row in df_export.iterrows():
         row_data = [Paragraph(str(row_name), cell_style)]
@@ -73,8 +81,12 @@ def generar_pdf(df_export, titulo="Tabla Dinámica - Bitlles Palou"):
             row_data.append(Paragraph(str(val), cell_style))
         data.append(row_data)
 
-    t = Table(data, repeatRows=1)
-    t.setStyle(TableStyle([
+    # --- DEFINIR ANCHOS COMPACTADOS DE COLUMNA ---
+    num_cols = len(headers)
+    col_widths = [110] + [45] * (num_cols - 1)
+
+    t_table = Table(data, colWidths=col_widths, repeatRows=1)
+    t_table.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1f77b4')),
         ('ALIGN', (0,0), (-1,-1), 'CENTER'),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
@@ -82,9 +94,13 @@ def generar_pdf(df_export, titulo="Tabla Dinámica - Bitlles Palou"):
         ('ROWBACKGROUNDS', (0,1), (-1,-2), [colors.white, colors.HexColor('#f2f2f2')]),
         ('BACKGROUND', (0,-1), (-1,-1), colors.HexColor('#e6ecf2')),
         ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
+        ('LEFTPADDING', (0,0), (-1,-1), 2),
+        ('RIGHTPADDING', (0,0), (-1,-1), 2),
+        ('TOPPADDING', (0,0), (-1,-1), 3),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 3),
     ]))
     
-    story.append(t)
+    story.append(t_table)
     doc.build(story)
     buffer.seek(0)
     return buffer.getvalue()
@@ -123,6 +139,7 @@ try:
             filtered_df = filtered_df[filtered_df['jornada'].isin(selected_jornadas)]
     else:
         st.error("No se encontró la columna 'jornada' en los datos.")
+        selected_jornadas = []
 
     st.write(f"**Registros encontrados:** {len(filtered_df)}")
 
@@ -141,55 +158,141 @@ try:
         pivot_mean = pivot_mean[orden_cols]
         pivot_count = pivot_count[orden_cols]
 
-        display_df = pd.DataFrame(index=pivot_mean.index, columns=[str(int(c)) for c in pivot_mean.columns])
+        display_df = pd.DataFrame(index=pivot_mean.index)
         
-        for r in pivot_mean.index:
-            for c in pivot_mean.columns:
-                m_val = pivot_mean.loc[r, c]
-                c_val = int(pivot_count.loc[r, c])
-                display_df.loc[r, str(int(c))] = f"{m_val:.2f} ({c_val})" if c_val > 0 else "0.00 (0)"
-
-        # --- CÁLCULO DE RESUMEN Y IC 95% INFERIOR (CON T DE STUDENT) ---
-        resumen_jugador_mean = filtered_df.groupby(col_jugador)[col_total].mean()
-        resumen_jugador_count = filtered_df.groupby(col_jugador)[col_total].count()
-        resumen_jugador_std = filtered_df.groupby(col_jugador)[col_total].std(ddof=1).fillna(0)
-
-        ic_lower_list = []
-        for r in display_df.index:
-            m = resumen_jugador_mean.get(r, 0)
-            n = resumen_jugador_count.get(r, 0)
-            s = resumen_jugador_std.get(r, 0)
-            
-            if n > 1:
-                t_crit = t.ppf(0.975, df=n-1)
-                ic_inf = m - (t_crit * (s / np.sqrt(n)))
+        # 1. Rellenar columnas de órdenes individuales (1 a 5, reserves, entreno)
+        for c in orden_cols:
+            c_int = int(c)
+            if c_int == 9:
+                col_name = 'reserves'
+            elif c_int == 10:
+                col_name = 'entreno'
             else:
-                ic_inf = m
-                
-            ic_lower_list.append(max(0, ic_inf))
+                col_name = str(c_int)
 
-        display_df['Total Resumen'] = [
-            f"{resumen_jugador_mean.loc[r]:.2f} ({int(resumen_jugador_count.loc[r])})" if r in resumen_jugador_mean else "0.00 (0)"
-            for r in display_df.index
-        ]
+            display_df[col_name] = [
+                f"{pivot_mean.loc[r, c]:.2f} ({int(pivot_count.loc[r, c])})" if pivot_count.loc[r, c] > 0 else "-"
+                for r in pivot_mean.index
+            ]
+
+        # 2. Calcular Lliga Pura (Exclusivamente órdenes 1, 2, 3, 4, 5)
+        df_lliga_filtered = filtered_df[filtered_df[col_ordre].isin([1, 2, 3, 4, 5])]
+        resumen_lliga_mean = df_lliga_filtered.groupby(col_jugador)[col_total].mean()
+        resumen_lliga_count = df_lliga_filtered.groupby(col_jugador)[col_total].count()
         
-        display_df['IC 95% Inf'] = [f"{v:.2f}" for v in ic_lower_list]
+        lliga_series = [
+            f"{resumen_lliga_mean.loc[r]:.2f} ({int(resumen_lliga_count.loc[r])})" if r in resumen_lliga_mean and resumen_lliga_count.loc[r] > 0 else "-"
+            for r in pivot_mean.index
+        ]
 
-        if not resumen_jugador_mean.empty:
-            sorted_jugadores = resumen_jugador_mean.sort_values(ascending=False).index
-            display_df = display_df.reindex([j for j in sorted_jugadores if j in display_df.index])
+        if 'entreno' not in display_df.columns:
+            display_df['entreno'] = "-"
+
+        # --- ORDENAR COLUMNAS INTERCAMBIANDO 'Lliga' TRAS LA COLUMNA '5' ---
+        cols_actuales = list(display_df.columns)
+        nuevas_cols_orden = []
+        for c in cols_actuales:
+            nuevas_cols_orden.append(c)
+            if c == '5':
+                nuevas_cols_orden.append('Lliga')
+        
+        if 'Lliga' not in nuevas_cols_orden:
+            nuevas_cols_orden.append('Lliga')
+
+        # Reconstruir dataframe temporal con el orden deseado
+        temp_ordered_df = pd.DataFrame(index=display_df.index)
+        for c in nuevas_cols_orden:
+            if c == 'Lliga':
+                temp_ordered_df['Lliga'] = lliga_series
+            else:
+                if c in display_df.columns:
+                    temp_ordered_df[c] = display_df[c]
+        display_df = temp_ordered_df
+
+        # --- CÁLCULO DE RANKING (PONDERACIÓN: Titulares 100%, Reserves 80%, Entreno 50%) ---
+        ranking_vals = []
+        ic_lower_list = []
+
+        for r in display_df.index:
+            df_jugador = filtered_df[filtered_df[col_jugador] == r]
+            
+            df_titular = df_jugador[df_jugador[col_ordre].isin([1, 2, 3, 4, 5])]
+            df_reserva = df_jugador[df_jugador[col_ordre] == 9]
+            df_entreno = df_jugador[df_jugador[col_ordre] == 10]
+            
+            n_tit = len(df_titular)
+            n_res = len(df_reserva)
+            n_entr = len(df_entreno)
+            
+            val_tit = df_titular[col_total].values if n_tit > 0 else np.array([])
+            val_res = df_reserva[col_total].values if n_res > 0 else np.array([])
+            val_entr = df_entreno[col_total].values if n_entr > 0 else np.array([])
+            
+            peso_res = 0.8  # 80% peso para reservas
+            peso_entr = 0.5 # 50% peso para entrenos
+            
+            n_efectivo = n_tit + (n_res * peso_res) + (n_entr * peso_entr)
+            
+            suma_tit = val_tit.sum() if n_tit > 0 else 0
+            suma_res = (val_res.sum() * peso_res) if n_res > 0 else 0
+            suma_entr = (val_entr.sum() * peso_entr) if n_entr > 0 else 0
+            
+            if n_efectivo > 0:
+                media_ponderada = (suma_tit + suma_res + suma_entr) / n_efectivo
+                
+                todos_los_datos = np.concatenate([v for v in [val_tit, val_res, val_entr] if len(v) > 0])
+                n_total = len(todos_los_datos)
+                
+                if n_total > 1:
+                    std_dev = np.std(todos_los_datos, ddof=1)
+                    t_crit = t.ppf(0.975, df=n_total - 1)
+                    ic_inf = media_ponderada - (t_crit * (std_dev / np.sqrt(n_total)))
+                else:
+                    ic_inf = media_ponderada
+                    
+                ranking_vals.append(media_ponderada)
+                ic_lower_list.append(max(0, ic_inf))
+            else:
+                ranking_vals.append(0.0)
+                ic_lower_list.append(0.0)
+
+        display_df['Ranking'] = [f"{v:.2f}" if v > 0 else "-" for v in ranking_vals]
+        display_df['IC 95% Inf'] = [f"{v:.2f}" if v > 0 else "-" for v in ic_lower_list]
+
+        #display_df['temp_rank'] = ranking_vals
+        display_df['temp_rank'] = ic_lower_list
+        display_df = display_df.sort_values(by='temp_rank', ascending=False).drop(columns=['temp_rank'])
 
         # --- RESUMEN VERTICAL (Por Orden) ---
         resumen_orden_mean = filtered_df.groupby(col_ordre)[col_total].mean()
         resumen_orden_count = filtered_df.groupby(col_ordre)[col_total].count()
         
         fila_resumen_vals = {}
-        for c in pivot_mean.columns:
-            fila_resumen_vals[str(int(c))] = f"{resumen_orden_mean.loc[c]:.2f} ({int(resumen_orden_count.loc[c])})" if c in resumen_orden_mean else "0.00 (0)"
-        
-        total_general_mean = filtered_df[col_total].mean()
-        total_general_count = filtered_df[col_total].count()
-        total_general_std = filtered_df[col_total].std(ddof=1)
+        for c in orden_cols:
+            c_int = int(c)
+            col_name = 'reserves' if c_int == 9 else ('entreno' if c_int == 10 else str(c_int))
+            fila_resumen_vals[col_name] = f"{resumen_orden_mean.loc[c]:.2f} ({int(resumen_orden_count.loc[c])})" if c in resumen_orden_mean else "-"
+
+        total_lliga_general_mean = df_lliga_filtered[col_total].mean() if not df_lliga_filtered.empty else 0
+        total_lliga_general_count = df_lliga_filtered[col_total].count() if not df_lliga_filtered.empty else 0
+        fila_resumen_vals['Lliga'] = f"{total_lliga_general_mean:.2f} ({int(total_lliga_general_count)})" if total_lliga_general_count > 0 else "-"
+
+        tot_lliga_val = extraer_media(fila_resumen_vals.get('Lliga', '0'))
+        tot_entreno_val = extraer_media(fila_resumen_vals.get('entreno', '0'))
+        if tot_lliga_val > 0 and tot_entreno_val > 0:
+            tot_ranking = (tot_lliga_val * 0.7) + (tot_entreno_val * 0.3)
+        elif tot_lliga_val > 0:
+            tot_ranking = tot_lliga_val
+        elif tot_entreno_val > 0:
+            tot_ranking = tot_entreno_val
+        else:
+            tot_ranking = 0.0
+
+        fila_resumen_vals['Ranking'] = f"{tot_ranking:.2f}" if tot_ranking > 0 else "-"
+
+        total_general_mean = filtered_df[col_total].mean() if not filtered_df.empty else 0
+        total_general_count = filtered_df[col_total].count() if not filtered_df.empty else 0
+        total_general_std = filtered_df[col_total].std(ddof=1) if total_general_count > 1 else 0
         
         if total_general_count > 1:
             t_crit_tot = t.ppf(0.975, df=total_general_count-1)
@@ -197,17 +300,20 @@ try:
         else:
             total_ic_inf = total_general_mean
 
-        fila_resumen_vals['Total Resumen'] = f"{total_general_mean:.2f} ({int(total_general_count)})" if total_general_count > 0 else "0.00 (0)"
-        fila_resumen_vals['IC 95% Inf'] = f"{max(0, total_ic_inf):.2f}" if total_general_count > 0 else "0.00"
+        fila_resumen_vals['IC 95% Inf'] = f"{max(0, total_ic_inf):.2f}" if total_general_count > 0 else "-"
 
-        fila_resumen_df = pd.DataFrame([fila_resumen_vals], index=['Total Resumen'])
+        fila_resumen_df = pd.DataFrame([{col: fila_resumen_vals.get(col, "-") for col in display_df.columns}], index=['Total Resumen'])
         display_completo = pd.concat([display_df, fila_resumen_df])
 
         # --- CABECERA SECCIÓN Y DESCARGA PDF ---
         c_title, c_pdf = st.columns([3, 1])
         c_title.subheader("Tabla Dinámica Compacta (Jugador vs Órdenes)")
         
-        pdf_bytes = generar_pdf(display_completo)
+        # Título dinámico del PDF con las jornadas seleccionadas
+        jornadas_str = ", ".join(map(str, selected_jornadas)) if selected_jornadas else "Todas"
+        titulo_pdf = f"Tabla Dinámica - Bitlles Palou - Jornades: {jornadas_str}"
+        
+        pdf_bytes = generar_pdf(display_completo, titulo=titulo_pdf)
         c_pdf.download_button(
             label="📄 Descargar Tabla en PDF",
             data=pdf_bytes,
